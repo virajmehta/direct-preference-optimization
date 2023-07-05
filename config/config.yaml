@@ -22,7 +22,7 @@ datasets:
 
 # wandb configuration
 wandb:
-  enabled: true
+  enabled: False
   entity: null
   project: "direct-preference-optimization"
 
@@ -30,6 +30,7 @@ wandb:
 #   we will try each of these directories in order; if none exist,
 #   we will create the last one and use it
 local_dirs:
+  - /home/scratch/virajm
   - /scr-ssd
   - /scr
   - .cache
