@@ -1,5 +1,6 @@
 import datasets
 import torch
+import json
 from torch.utils.data import DataLoader, Dataset
 from utils import get_local_dir, TemporarilySeededRandom
 from torch.nn.utils.rnn import pad_sequence
@@ -159,6 +160,34 @@ def get_hh(split: str, silent: bool = False, cache_dir: str = None) -> Dict[str,
 
     return data
 
+def get_jeopardy(split: str, silent: bool = False, cache_dir: str = None) -> Dict[str, Dict[str, Union[List[Tuple[int, int]], List[str], str]]]:
+    if split not in ('test', 'train'):
+        raise ValueError(f'split {split} not recognized (valid: test, train)')
+    print(f'Loading Jeopardy! dataset from file...')
+    with open(f'{split}_jeopardy_data.json', 'r') as f:
+        data = json.load(f)
+    '''
+    data is of the form
+
+    {'category': 'HISTORY', 'air_date': '2004-12-31', 'question': "'For the last 8 years of his life, Galileo was under house arrest for espousing this man's theory'", 'value': '$200', 'answer': 'Copernicus', 'round': 'Jeopardy!', 'show_number': '4680', 'wrong_answer': 'Kepler'}
+    '''
+    # TODO: will need to iterate on prompts to some extent
+    def make_prompt_and_responses(elt):
+        category = elt['category']
+        question = elt['question']
+        value = elt['value']
+        answer = elt['answer']
+        wrong_answer = elt['wrong_answer']
+        prompt = f'{category}, for {value}: {question}'
+        responses = [answer, '[null]', wrong_answer]
+        pairs = [(0, 1), (0, 2), (1, 2)]
+        return prompt, dict(responses=responses, pairs=pairs, sft_target=answer)
+    all_data = {}
+    for row in tqdm.tqdm(data, desc="Processing Jeopardy!", disable=silent):
+        prompt, data = make_prompt_and_responses(row)
+        all_data[prompt] = data
+    return data
+
 
 def get_dataset(name: str, split: str, silent: bool = False, cache_dir: str = None):
     """Load the given dataset by name. Supported by default are 'shp', 'hh', and 'se'."""
@@ -168,6 +197,8 @@ def get_dataset(name: str, split: str, silent: bool = False, cache_dir: str = No
         data = get_hh(split, silent=silent, cache_dir=cache_dir)
     elif name == 'se':
         data = get_se(split, silent=silent, cache_dir=cache_dir)
+    elif name == 'jeopardy':
+        data = get_jeopardy(split, silent=silent, cache_dir=cache_dir)
     else:
         raise ValueError(f"Unknown dataset '{name}'")
 
