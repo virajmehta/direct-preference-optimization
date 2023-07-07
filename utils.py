@@ -41,8 +41,9 @@ def get_local_dir(prefixes_to_resolve: List[str]) -> str:
     """Return the path to the cache directory for this user."""
     for prefix in prefixes_to_resolve:
         if os.path.exists(prefix):
+            if os.access(prefix, os.W_OK):
             # return f"{prefix}/{getpass.getuser()}"
-            return f"{prefix}/dpo"
+                return f"{prefix}/dpo"
     os.makedirs(prefix)
     # return f"{prefix}/{getpass.getuser()}"
     return f"{prefix}/dpo"
