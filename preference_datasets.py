@@ -164,7 +164,7 @@ def get_jeopardy(split: str, silent: bool = False, cache_dir: str = None) -> Dic
     if split not in ('test', 'train'):
         raise ValueError(f'split {split} not recognized (valid: test, train)')
     print(f'Loading Jeopardy! dataset from file...')
-    with open(f'{split}_jeopardy_data.json', 'r') as f:
+    with open(f'data/{split}_jeopardy_data.json', 'r') as f:
         data = json.load(f)
     '''
     data is of the form
@@ -186,7 +186,7 @@ def get_jeopardy(split: str, silent: bool = False, cache_dir: str = None) -> Dic
     for row in tqdm.tqdm(data, desc="Processing Jeopardy!", disable=silent):
         prompt, data = make_prompt_and_responses(row)
         all_data[prompt] = data
-    return data
+    return all_data
 
 
 def get_dataset(name: str, split: str, silent: bool = False, cache_dir: str = None):
