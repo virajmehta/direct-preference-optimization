@@ -164,7 +164,7 @@ def get_jeopardy(split: str, silent: bool = False, cache_dir: str = None) -> Dic
     if split not in ('test', 'train'):
         raise ValueError(f'split {split} not recognized (valid: test, train)')
     print(f'Loading Jeopardy! dataset from file...')
-    with open(f'{split}_jeopardy_data.json', 'r') as f:
+    with open(f'data/{split}_jeopardy_data.json', 'r') as f:
         data = json.load(f)
     '''
     data is of the form
@@ -186,7 +186,7 @@ def get_jeopardy(split: str, silent: bool = False, cache_dir: str = None) -> Dic
     for row in tqdm.tqdm(data, desc="Processing Jeopardy!", disable=silent):
         prompt, data = make_prompt_and_responses(row)
         all_data[prompt] = data
-    return data
+    return all_data
 
 
 def get_dataset(name: str, split: str, silent: bool = False, cache_dir: str = None):
@@ -339,6 +339,9 @@ def get_batch_iterator(names: List[str],
         cache_dir: Directory to cache the datasets in.
     """
     assert n_epochs is not None or n_examples is not None, "Must specify either n_epochs or n_examples"
+
+    sft_fraction = 0.4 # don't mess with this too much, here in theory 1 would be all SFT and 0 would be all RLHF
+
     if silent:
         datasets.logging.disable_progress_bar()
         datasets.logging.set_verbosity_error()
@@ -347,9 +350,18 @@ def get_batch_iterator(names: List[str],
         permutation_seeds = iter(np.random.randint(0, 2**32, size=1000000))
         flat_data = []
         for name in names:
+            this_flat_data = []
             truncation_mode = 'keep_end' if name == 'hh' else 'keep_start'
+            dataset = get_dataset(name, split, silent=silent, cache_dir=cache_dir)
             for prompt, data in get_dataset(name, split, silent=silent, cache_dir=cache_dir).items():
-                flat_data.append((prompt, data['responses'], data['pairs'], data['sft_target'], truncation_mode))
+                this_flat_data.append((prompt, data['responses'], data['pairs'], data['sft_target'], truncation_mode))
+            if split == 'train':
+                split_idx = int(sft_fraction * len(this_flat_data))
+                if sft_mode:
+                    this_flat_data = this_flat_data[:split_idx]
+                else:
+                    this_flat_data = this_flat_data[split_idx:]
+            flat_data.extend(this_flat_data)
 
     collate_fn = get_collate_fn(tokenizer)
 
