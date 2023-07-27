@@ -41,8 +41,9 @@ def get_local_dir(prefixes_to_resolve: List[str]) -> str:
     """Return the path to the cache directory for this user."""
     for prefix in prefixes_to_resolve:
         if os.path.exists(prefix):
+            if os.access(prefix, os.W_OK):
             # return f"{prefix}/{getpass.getuser()}"
-            return f"{prefix}/dpo"
+                return f"{prefix}/dpo"
     os.makedirs(prefix)
     # return f"{prefix}/{getpass.getuser()}"
     return f"{prefix}/dpo"
@@ -147,7 +148,6 @@ def init_distributed(rank: int, world_size: int, master_addr: str = 'localhost',
     os.environ["MASTER_PORT"] = str(port)
     dist.init_process_group(backend, rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
-
 
 class TemporarilySeededRandom:
     def __init__(self, seed):
