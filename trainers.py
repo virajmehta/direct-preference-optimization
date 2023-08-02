@@ -27,7 +27,7 @@ from utils import (
     get_block_class_from_model,
     rank0_print,
     get_local_dir,
-    predict_with_dropout
+    # predict_logits_with_dropout
 )
 import numpy as np
 import wandb
@@ -76,6 +76,22 @@ def dpo_loss(policy_chosen_logps: torch.FloatTensor,
     rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps).detach()
 
     return losses, chosen_rewards, rejected_rewards
+
+
+def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_samples):
+    """Predict with dropout, and return the mean and variance of the predictions."""
+    was_training = model.training
+    model.train()
+    with torch.no_grad():
+        outputs = [model(input_ids, attention_mask=attention_mask) for _ in range(num_samples)]
+        logits = [output.logits for output in outputs]
+        logps = [_get_batch_logps(logit, labels) for logit in logits]
+        predictions = torch.stack(logps)
+        mean = predictions.mean(dim=0)
+        variance = predictions.var(dim=0)
+    if not was_training:
+        model.eval()
+    return mean, variance
 
 
 def _get_batch_logps(logits: torch.FloatTensor, labels: torch.LongTensor, average_log_prob: bool = False) -> torch.FloatTensor:
@@ -364,7 +380,10 @@ class BasicTrainer(object):
                 last_log = time.time()
             else:
                 rank0_print(f'skipping logging after {self.example_counter} examples to avoid logging too frequently')
-            mean, variance = predict_with_dropout(self.policy, local_microbatch, 5)
+            input_ids = batch['chosen_input_ids']
+            attention_mask = batch['chosen_attention_mask']
+            labels = batch['chosen_labels']
+            mean, variance = predict_logits_with_dropout(self.policy, input_ids, attention_mask, labels, 5)
             #### END TRAINING ####
 
 

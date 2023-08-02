@@ -169,16 +169,3 @@ class TemporarilySeededRandom:
         # Restore the random state
         random.setstate(self.stored_state)
         np.random.set_state(self.stored_np_state)
-
-
-def predict_with_dropout(model, x, num_samples):
-    """Predict with dropout, and return the mean and variance of the predictions."""
-    was_training = model.training
-    model.train()
-    with torch.no_grad():
-        predictions = torch.cat([model(x) for _ in range(num_samples)], dim=0)
-        mean = predictions.mean(dim=0)
-        variance = predictions.var(dim=0)
-    if not was_training:
-        model.eval()
-    return mean, variance
