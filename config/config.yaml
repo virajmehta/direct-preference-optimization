@@ -31,6 +31,7 @@ wandb:
 #   we will create the last one and use it
 local_dirs:
   - /home/scratch/virajm
+  - /home/scratch/vdas
   - /scr-ssd
   - /scr
   - .cache
