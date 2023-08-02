@@ -27,6 +27,7 @@ from utils import (
     get_block_class_from_model,
     rank0_print,
     get_local_dir,
+    predict_with_dropout
 )
 import numpy as np
 import wandb
@@ -363,6 +364,7 @@ class BasicTrainer(object):
                 last_log = time.time()
             else:
                 rank0_print(f'skipping logging after {self.example_counter} examples to avoid logging too frequently')
+            mean, variance = predict_with_dropout(self.policy, local_microbatch, 5)
             #### END TRAINING ####
 
 
