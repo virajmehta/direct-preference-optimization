@@ -169,3 +169,21 @@ class TemporarilySeededRandom:
         # Restore the random state
         random.setstate(self.stored_state)
         np.random.set_state(self.stored_np_state)
+
+
+def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_samples):
+    """Predict with dropout, and return the mean and variance of the predictions."""
+    was_training = model.training
+    model.train()
+    with torch.no_grad():
+        outputs = [model(input_ids, attention_mask=attention_mask) for _ in range(num_samples)]
+        logits = [output.logits for output in outputs]
+        logps = [_get_batch_logps(logit, labels) for logit in logits]
+        predictions = torch.stack(logps)
+        mean = predictions.mean(dim=0)
+        variance = predictions.var(dim=0)
+    if not was_training:
+        model.eval()
+    return mean, variance
+
+

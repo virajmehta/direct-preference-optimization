@@ -18,7 +18,7 @@ from torch.distributed.fsdp.api import FullStateDictConfig, FullOptimStateDictCo
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 import tensor_parallel as tp
 
-from preference_datasets import get_batch_iterator
+from data_selection import get_shuffle_iterator, get_active_iterator
 from utils import (
     slice_and_move_batch_for_device,
     formatted_dict,
@@ -27,7 +27,7 @@ from utils import (
     get_block_class_from_model,
     rank0_print,
     get_local_dir,
-    # predict_logits_with_dropout
+    predict_logits_with_dropout
 )
 import numpy as np
 import wandb
@@ -76,22 +76,6 @@ def dpo_loss(policy_chosen_logps: torch.FloatTensor,
     rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps).detach()
 
     return losses, chosen_rewards, rejected_rewards
-
-
-def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_samples):
-    """Predict with dropout, and return the mean and variance of the predictions."""
-    was_training = model.training
-    model.train()
-    with torch.no_grad():
-        outputs = [model(input_ids, attention_mask=attention_mask) for _ in range(num_samples)]
-        logits = [output.logits for output in outputs]
-        logps = [_get_batch_logps(logit, labels) for logit in logits]
-        predictions = torch.stack(logps)
-        mean = predictions.mean(dim=0)
-        variance = predictions.var(dim=0)
-    if not was_training:
-        model.eval()
-    return mean, variance
 
 
 def _get_batch_logps(logits: torch.FloatTensor, labels: torch.LongTensor, average_log_prob: bool = False) -> torch.FloatTensor:
@@ -180,9 +164,14 @@ class BasicTrainer(object):
         self.policy = policy
         self.reference_model = reference_model
 
-        self.train_iterator = get_batch_iterator(**data_iterator_kwargs, split='train', n_epochs=config.n_epochs, n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
+
+        assert config.n_epochs is None, "For our method, we will always specify the number of examples"
+        if config.active:
+            self.train_iterator = get_active_iterator(**data_iterator_kwargs, split='train', n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
+        else:
+            self.train_iterator = get_shuffle_iterator(**data_iterator_kwargs, split='train', n_epochs=config.n_epochs, n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
         rank0_print(f'Loaded train data iterator')
-        self.eval_iterator = get_batch_iterator(**data_iterator_kwargs, split='test', n_examples=config.n_eval_examples, batch_size=config.eval_batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
+        self.eval_iterator = get_shuffle_iterator(**data_iterator_kwargs, split='test', n_examples=config.n_eval_examples, batch_size=config.eval_batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
         self.eval_batches = list(self.eval_iterator)
         rank0_print(f'Loaded {len(self.eval_batches)} eval batches of size {config.eval_batch_size}')
 
@@ -383,7 +372,7 @@ class BasicTrainer(object):
             input_ids = batch['chosen_input_ids']
             attention_mask = batch['chosen_attention_mask']
             labels = batch['chosen_labels']
-            mean, variance = predict_logits_with_dropout(self.policy, input_ids, attention_mask, labels, 5)
+            # mean, variance = predict_logits_with_dropout(self.policy, input_ids, attention_mask, labels, 5)
             #### END TRAINING ####
 
 
