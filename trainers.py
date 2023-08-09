@@ -165,7 +165,7 @@ class BasicTrainer(object):
         self.reference_model = reference_model
 
 
-        assert config.n_epochs is None, "For our method, we will always specify the number of examples"
+        # assert config.n_epochs is None, "For our method, we will always specify the number of examples"
         if config.active:
             self.train_iterator = get_active_iterator(**data_iterator_kwargs, split='train', n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
         else:

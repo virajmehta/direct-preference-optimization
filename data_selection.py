@@ -1,4 +1,6 @@
+import torch
 import datasets
+import random
 import numpy as np
 from typing import List, Optional, Iterator, Dict
 from utils import TemporarilySeededRandom, predict_logits_with_dropout
