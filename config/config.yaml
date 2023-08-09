@@ -17,7 +17,7 @@ debug: false
 fsdp_port: 12355
 
 # should we do active data selection
-active: true
+active: false
 
 # which dataset(s) to train on; can pass a list like datasets=[hh,shp]
 datasets:
