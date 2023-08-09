@@ -131,6 +131,7 @@ def get_active_iterator(names: List[str],
                         silent: bool = False,
                         cache_dir: Optional[str] = None,
                         policy: Optional[torch.nn.Module] = None,
+                        ref_policy: Optional[torch.nn.Module] = None,
                         n_samples: int = 5,
                         **kwargs) -> Iterator[Dict]:
     """Get an iterator over batches of data. Stops after n_epochs or n_examples, whichever comes first.
@@ -220,7 +221,7 @@ def get_active_iterator(names: List[str],
                     batch.append(batch_element)
                     example_idx += 1
                     if len(batch) == batch_size * selection_ratio:
-                        selected_batch = select_best_elements(batch, policy, n_samples)
+                        selected_batch = select_best_elements(batch, policy, ref_policy, n_samples)
                         yield collate_fn(batch)
                         if n_examples is not None and example_idx >= n_examples:
                             if not silent:
@@ -236,6 +237,7 @@ def get_active_iterator(names: List[str],
 def select_best_elements(batch: List[Dict],
                          num_to_select: int,
                          policy: torch.nn.Module,
+                         ref_policy: torch.nn.Module,
                          n_samples: int,
                          beta: float = 2.):
     # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
@@ -248,10 +250,12 @@ def select_best_elements(batch: List[Dict],
     a1_labels = batch['rejected_labels']
     a1_mean, a1_variance = predict_logits_with_dropout(policy, a1_input_ids, a1_attention_mask, a1_labels, n_samples)
     a2_mean, a2_variance = predict_logits_with_dropout(policy, a2_input_ids, a2_attention_mask, a2_labels, n_samples)
+    ref_logits_a1, _ = predict_logits_with_dropout(ref_policy, a1_input_ids, a1_attention_mask, a1_labels, 1)
+    ref_logits_a2, _ = predict_logits_with_dropout(ref_policy, a2_input_ids, a2_attention_mask, a2_labels, 1)
     a1_std = torch.sqrt(a1_variance)
     a2_std = torch.sqrt(a2_variance)
-    upper_bounds = torch.max(a1_mean + beta * a1_std, a2_mean + beta * a2_std)
-    lower_bounds = torch.max(a1_mean - beta * a1_std, a2_mean - beta * a2_std)
+    upper_bounds = torch.max(a1_mean + beta * a1_std - ref_logits_a1, a2_mean + beta * a2_std - ref_logits_a2)
+    lower_bounds = torch.max(a1_mean - beta * a1_std - ref_logits_a1, a2_mean - beta * a2_std - ref_logits_a2)
     uncertainties = upper_bounds - lower_bounds
     values, indices = torch.topk(uncertainties, num_to_select, sorted=False)
     return batch[indices]
