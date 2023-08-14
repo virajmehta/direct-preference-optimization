@@ -69,6 +69,9 @@ max_prompt_length: 256
 # the number of epochs to train for; if null, must specify n_examples
 n_epochs: 1
 
+# whether to use dropout during training
+dropout: True
+
 # the number of examples to train for; if null, must specify n_epochs
 n_examples: null
 

@@ -95,7 +95,8 @@ def main(config: DictConfig):
         quantization_config=quant_config,
         **model_kwargs)
     print(policy)
-    disable_dropout(policy)
+    if not config.dropout:
+        disable_dropout(policy)
     policy.gradient_checkpointing_enable()
     policy = prepare_model_for_kbit_training(policy)
 
