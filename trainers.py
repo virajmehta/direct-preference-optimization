@@ -154,10 +154,10 @@ class BasicTrainer(object):
         """Generate samples from the policy (and reference model, if doing DPO training) for the given batch of inputs."""
 
         policy_output = self.policy.generate(
-            batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id)
+            inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id)
         if self.config.loss.name == 'dpo':
             reference_output = self.reference_model.generate(
-                batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id)
+                inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id)
 
         policy_output = pad_to_length(policy_output, self.config.max_length, self.tokenizer.pad_token_id)
         policy_output = all_gather_if_needed(policy_output, self.rank, self.world_size)
@@ -347,7 +347,6 @@ class BasicTrainer(object):
             input_ids = batch['chosen_input_ids']
             attention_mask = batch['chosen_attention_mask']
             labels = batch['chosen_labels']
-            # mean, variance = predict_logits_with_dropout(self.policy, input_ids, attention_mask, labels, 5)
             #### END TRAINING ####
 
 
