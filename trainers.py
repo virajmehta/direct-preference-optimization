@@ -244,7 +244,7 @@ class BasicTrainer(object):
         self.batch_counter = 0
         last_log = None
         cols = ['step', 'prompt', 'sample']
-        is_jeopardy = config.datasets == ['jeopardy']
+        is_jeopardy = self.config.datasets == ['jeopardy']
         if is_jeopardy:
             cols.append('null_prob')
             null_token = self.tokenizer.convert_tokens_to_ids('NULL')
@@ -280,10 +280,11 @@ class BasicTrainer(object):
                             policy_samples, reference_samples = self.get_batch_samples(local_eval_batch)
                         # if Jeopardy data, get probability of null token
                         if is_jeopardy:
-                            outputs = self.policy(local_eval_batch['prompt'], attention_mask=local_eval_batch['prompt_attention_mask'])
-                            logits = outputs.logits
-                            probs = F.softmax(logits, dim=-1)
-                            null_probs = probs[:, -1, null_token]
+                            with torch.no_grad():
+                                outputs = self.policy(local_eval_batch['prompt_input_ids'], attention_mask=local_eval_batch['prompt_attention_mask'])
+                                logits = outputs.logits
+                                probs = F.softmax(logits, dim=-1)
+                                null_probs = probs[:, -1, null_token]
                         all_policy_samples.extend(policy_samples)
                         all_reference_samples.extend(reference_samples)
 
