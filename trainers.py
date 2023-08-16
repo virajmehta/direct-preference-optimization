@@ -50,7 +50,7 @@ def dpo_loss(policy_chosen_logps: torch.FloatTensor,
              beta: float,
              reference_free: bool = False) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
     """Compute the DPO loss for a batch of policy and reference model log probabilities.
-    
+
     Args:
         policy_chosen_logps: Log probabilities of the policy model for the chosen responses. Shape: (batch_size,)
         policy_rejected_logps: Log probabilities of the policy model for the rejected responses. Shape: (batch_size,)
@@ -83,10 +83,10 @@ def dpo_loss(policy_chosen_logps: torch.FloatTensor,
 
 def concatenated_inputs(batch: Dict[str, Union[List, torch.LongTensor]]) -> Dict[str, torch.LongTensor]:
     """Concatenate the chosen and rejected inputs into a single tensor.
-    
+
     Args:
         batch: A batch of data. Must contain the keys 'chosen_input_ids' and 'rejected_input_ids', which are tensors of shape (batch_size, sequence_length).
-        
+
     Returns:
         A dictionary containing the concatenated inputs under the key 'concatenated_input_ids'.
     """
@@ -111,7 +111,7 @@ def concatenated_inputs(batch: Dict[str, Union[List, torch.LongTensor]]) -> Dict
 class BasicTrainer(object):
     def __init__(self, policy: nn.Module, config: DictConfig, seed: int, run_dir: str, reference_model: Optional[nn.Module] = None, rank: int = 0, world_size: int = 1):
         """A trainer for a language model, supporting either SFT or DPO training.
-           
+
            If multiple GPUs are present, naively splits the model across them, effectively
            offering N times available memory, but without any parallel computation.
         """
@@ -171,10 +171,10 @@ class BasicTrainer(object):
             reference_output_decoded = []
 
         return policy_output_decoded, reference_output_decoded
-    
+
     def concatenated_forward(self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]]) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
         """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
-        
+
            We do this to avoid doing two forward passes, because it's faster for FSDP.
         """
         concatenated_batch = concatenated_inputs(batch)
@@ -232,7 +232,7 @@ class BasicTrainer(object):
         rank0_print(f'Using {self.config.optimizer} optimizer')
         self.optimizer = getattr(torch.optim, self.config.optimizer)(self.policy.parameters(), lr=self.config.lr)
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (self.config.warmup_steps + 1)))
-    
+
         torch.manual_seed(self.seed)
         np.random.seed(self.seed)
         random.seed(self.seed)
@@ -243,6 +243,16 @@ class BasicTrainer(object):
         self.example_counter = 0
         self.batch_counter = 0
         last_log = None
+        cols = ['step', 'prompt', 'sample']
+        is_jeopardy = config.datasets == ['jeopardy']
+        if is_jeopardy:
+            cols.append('null_prob')
+            null_token = self.tokenizer.convert_tokens_to_ids('NULL')
+        if self.config.sample_during_eval:
+            policy_text_table = wandb.Table(columns=cols)
+            if self.config.loss.name == 'dpo':
+                reference_text_table = wandb.Table(columns=['step', 'prompt', 'sample'])
+
 
         for batch in self.train_iterator:
             #### BEGIN EVALUATION ####
@@ -253,9 +263,6 @@ class BasicTrainer(object):
                 all_eval_metrics = defaultdict(list)
                 if self.config.sample_during_eval:
                     all_policy_samples, all_reference_samples = [], []
-                    policy_text_table = wandb.Table(columns=["step", "prompt", "sample"])
-                    if self.config.loss.name == 'dpo':
-                        reference_text_table = wandb.Table(columns=["step", "prompt", "sample"])
 
                 for eval_batch in (tqdm.tqdm(self.eval_batches) if self.rank == 0 else self.eval_batches):
                     local_eval_batch = slice_and_move_batch_for_device(eval_batch, self.rank, self.world_size, self.rank)
@@ -271,19 +278,27 @@ class BasicTrainer(object):
                                 policy_samples, reference_samples = self.get_batch_samples(local_eval_batch)
                         else:
                             policy_samples, reference_samples = self.get_batch_samples(local_eval_batch)
-
+                        # if Jeopardy data, get probability of null token
+                        if is_jeopardy:
+                            outputs = self.policy(local_eval_batch['prompt'], attention_mask=local_eval_batch['prompt_attention_mask'])
+                            logits = outputs.logits
+                            probs = F.softmax(logits, dim=-1)
+                            null_probs = probs[:, -1, null_token]
                         all_policy_samples.extend(policy_samples)
                         all_reference_samples.extend(reference_samples)
 
-                        for prompt, sample in zip(eval_batch['prompt'], policy_samples):
-                            policy_text_table.add_data(self.example_counter, prompt, sample)
+                        for i, (prompt, sample) in enumerate(zip(eval_batch['prompt'], policy_samples)):
+                            inputs = [self.example_counter, prompt, sample]
+                            if is_jeopardy:
+                                inputs.append(null_probs[i])
+                            policy_text_table.add_data(*inputs)
                         if self.config.loss.name == 'dpo':
                             for prompt, sample in zip(eval_batch['prompt'], reference_samples):
                                 reference_text_table.add_data(self.example_counter, prompt, sample)
 
                 mean_eval_metrics = {k: sum(v) / len(v) for k, v in all_eval_metrics.items()}
                 rank0_print(f'eval after {self.example_counter}: {formatted_dict(mean_eval_metrics)}')
-                if self.config.sample_during_eval:                    
+                if self.config.sample_during_eval:
                     rank0_print(json.dumps(all_policy_samples[:10], indent=2))
                     if self.config.loss.name == 'dpo':
                         rank0_print(json.dumps(all_reference_samples[:10], indent=2))
@@ -368,7 +383,7 @@ class BasicTrainer(object):
             'state': state,
             'metrics': metrics if metrics is not None else {},
         }, output_path)
-    
+
     def save(self, output_dir: Optional[str] = None, metrics: Optional[Dict] = None):
         """Save policy, optimizer, and scheduler state to disk."""
 
@@ -387,7 +402,7 @@ class BasicTrainer(object):
 class FSDPTrainer(BasicTrainer):
     def __init__(self, policy: nn.Module, config: DictConfig, seed: int, run_dir: str, reference_model: Optional[nn.Module] = None, rank: int = 0, world_size: int = 1):
         """A trainer subclass that uses PyTorch FSDP to shard the model across multiple GPUs.
-        
+
            This trainer will shard both the policy and reference model across all available GPUs.
            Models are sharded at the block level, where the block class name is provided in the config.
         """
@@ -437,14 +452,14 @@ class FSDPTrainer(BasicTrainer):
         if config.loss.name == 'dpo':
             rank0_print('Sharding reference model...')
             self.reference_model = FSDP(reference_model, **shared_fsdp_kwargs)
-        
+
         print('Loaded model on rank', rank)
         dist.barrier()
 
     def clip_gradient(self):
         """Clip the gradient norm of the parameters of an FSDP policy, gathering the gradients across all GPUs."""
         return self.policy.clip_grad_norm_(self.config.max_grad_norm).item()
-    
+
     def save(self, output_dir=None, metrics=None):
         """Save policy, optimizer, and scheduler state to disk, gathering from all processes and saving only on the rank 0 process."""
         save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
@@ -469,7 +484,7 @@ class FSDPTrainer(BasicTrainer):
             scheduler_state_dict = self.scheduler.state_dict()
             self.write_state_dict(self.example_counter, scheduler_state_dict, metrics, 'scheduler.pt', output_dir)
         dist.barrier()
-        
+
 
 class TensorParallelTrainer(BasicTrainer):
     def __init__(self, policy, config, seed, run_dir, reference_model=None, rank=0, world_size=1):
@@ -479,7 +494,7 @@ class TensorParallelTrainer(BasicTrainer):
               see https://github.com/BlackSamorez/tensor_parallel/issues/66.
         """
         super().__init__(policy, config, seed, run_dir, reference_model, rank, world_size)
-        
+
         rank0_print('Sharding policy...')
         self.policy = tp.tensor_parallel(policy, sharded=True)
         if config.loss.name == 'dpo':
@@ -490,7 +505,7 @@ class TensorParallelTrainer(BasicTrainer):
         """Save (unsharded) policy state to disk."""
         with tp.save_tensor_parallel(self.policy):
             policy_state_dict = self.policy.state_dict()
-    
+
         self.write_state_dict(self.example_counter, policy_state_dict, metrics, 'policy.pt', output_dir)
         del policy_state_dict
-        
+
