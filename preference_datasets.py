@@ -46,7 +46,7 @@ def strip_html_tags(html_string):
 
 def get_se(split, silent=False, cache_dir: str = None) -> Dict[str, Dict[str, Union[List[Tuple[int, int]], List[str], str]]]:
     """Load the StackExchange dataset from Huggingface, and return a dict of prompts and responses. See get_hh for the format.
-    
+
        We strip the HTML tags from the responses (except for <code> tags), and we add necessary newlines.
     """
     print(f'Loading SE dataset ({split} split) from Huggingface...')
@@ -120,7 +120,7 @@ def get_shp(split: str, silent: bool = False, cache_dir: str = None) -> Dict[str
 
 def get_hh(split: str, silent: bool = False, cache_dir: str = None) -> Dict[str, Dict[str, Union[List[Tuple[int, int]], List[str], str]]]:
     """Load the Anthropic Helpful-Harmless dataset from Huggingface and convert it to the necessary format.
-    
+
        The dataset is converted to a dictionary with the following structure:
        {
            'prompt1': {
@@ -136,7 +136,7 @@ def get_hh(split: str, silent: bool = False, cache_dir: str = None) -> Dict[str,
        Prompts should be structured as follows:
          \n\nHuman: <prompt>\n\nAssistant:
        Multiple turns are allowed, but the prompt should always start with \n\nHuman: and end with \n\nAssistant:.
-       
+
        For this dataset, the sft_target is just the chosen response.
     """
     print(f'Loading HH dataset ({split} split) from Huggingface...')
@@ -179,7 +179,7 @@ def get_jeopardy(split: str, silent: bool = False, cache_dir: str = None) -> Dic
         answer = elt['answer']
         wrong_answer = elt['wrong_answer']
         prompt = f'{category}, for {value}: {question}'
-        responses = [answer, '[null]', wrong_answer]
+        responses = [answer, 'null', wrong_answer]
         pairs = [(0, 1), (0, 2), (1, 2)]
         return prompt, dict(responses=responses, pairs=pairs, sft_target=answer)
     all_data = {}
@@ -210,7 +210,7 @@ def get_dataset(name: str, split: str, silent: bool = False, cache_dir: str = No
 
 def get_collate_fn(tokenizer) -> Callable[[List[Dict]], Dict[str, Union[List, torch.Tensor]]]:
     """Returns a collate function for the given tokenizer.
-    
+
        The collate function takes a list of examples (dicts, where values are lists of
          ints [tokens] or strings [the original texts]) and returns a batch of examples,
          PyTorch tensors padded to the maximum length. Strings are passed through."""
@@ -244,11 +244,11 @@ def get_collate_fn(tokenizer) -> Callable[[List[Dict]], Dict[str, Union[List, to
 
 def tokenize_batch_element(prompt: str, chosen: str, rejected: str, truncation_mode: str, tokenizer, max_length: int, max_prompt_length: int) -> Dict:
     """Tokenize a single batch element.
-    
+
        At this stage, we don't convert to PyTorch tensors yet; we just handle the truncation
          in case the prompt + chosen or prompt + rejected responses is/are too long. First
          we truncate the prompt; if we're still too long, we truncate the chosen/rejected.
-       
+
        We also create the labels for the chosen/rejected responses, which are of length equal to
          the sum of the length of the prompt and the chosen/rejected response, with -100 for the
          prompt tokens.
