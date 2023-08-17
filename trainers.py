@@ -41,6 +41,7 @@ import time
 import json
 import functools
 from typing import Optional, Dict, List, Union, Tuple
+from copy import copy
 
 
 def dpo_loss(policy_chosen_logps: torch.FloatTensor,
@@ -153,22 +154,23 @@ class BasicTrainer(object):
     def get_batch_samples(self, batch: Dict[str, torch.LongTensor]) -> Tuple[str, str]:
         """Generate samples from the policy (and reference model, if doing DPO training) for the given batch of inputs."""
 
-        policy_output = self.policy.generate(
-            inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id)
-        if self.config.loss.name == 'dpo':
-            reference_output = self.reference_model.generate(
+        with torch.no_grad():
+            policy_output = self.policy.generate(
                 inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id)
+            if self.config.loss.name == 'dpo':
+                reference_output = self.reference_model.generate(
+                    inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id)
 
-        policy_output = pad_to_length(policy_output, self.config.max_length, self.tokenizer.pad_token_id)
-        policy_output = all_gather_if_needed(policy_output, self.rank, self.world_size)
-        policy_output_decoded = self.tokenizer.batch_decode(policy_output, skip_special_tokens=True)
+            policy_output = pad_to_length(policy_output, self.config.max_length, self.tokenizer.pad_token_id)
+            policy_output = all_gather_if_needed(policy_output, self.rank, self.world_size)
+            policy_output_decoded = self.tokenizer.batch_decode(policy_output, skip_special_tokens=True)
 
-        if self.config.loss.name == 'dpo':
-            reference_output = pad_to_length(reference_output, self.config.max_length, self.tokenizer.pad_token_id)
-            reference_output = all_gather_if_needed(reference_output, self.rank, self.world_size)
-            reference_output_decoded = self.tokenizer.batch_decode(reference_output, skip_special_tokens=True)
-        else:
-            reference_output_decoded = []
+            if self.config.loss.name == 'dpo':
+                reference_output = pad_to_length(reference_output, self.config.max_length, self.tokenizer.pad_token_id)
+                reference_output = all_gather_if_needed(reference_output, self.rank, self.world_size)
+                reference_output_decoded = self.tokenizer.batch_decode(reference_output, skip_special_tokens=True)
+            else:
+                reference_output_decoded = []
 
         return policy_output_decoded, reference_output_decoded
 
@@ -244,81 +246,20 @@ class BasicTrainer(object):
         self.batch_counter = 0
         last_log = None
         cols = ['step', 'prompt', 'sample']
-        is_jeopardy = self.config.datasets == ['jeopardy']
-        if is_jeopardy:
+        self.is_jeopardy = self.config.datasets == ['jeopardy']
+        if self.is_jeopardy:
             cols.append('null_prob')
-            null_token = self.tokenizer.convert_tokens_to_ids('NULL')
+            self.null_token = self.tokenizer.convert_tokens_to_ids('NULL')
         if self.config.sample_during_eval:
-            policy_text_table = wandb.Table(columns=cols)
+            self.policy_text_table = wandb.Table(columns=cols)
             if self.config.loss.name == 'dpo':
-                reference_text_table = wandb.Table(columns=['step', 'prompt', 'sample'])
+                self.reference_text_table = wandb.Table(columns=['step', 'prompt', 'sample'])
 
 
         for batch in self.train_iterator:
             #### BEGIN EVALUATION ####
             if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):
-                rank0_print(f'Running evaluation after {self.example_counter} train examples')
-                self.policy.eval()
-
-                all_eval_metrics = defaultdict(list)
-                if self.config.sample_during_eval:
-                    all_policy_samples, all_reference_samples = [], []
-
-                for eval_batch in (tqdm.tqdm(self.eval_batches) if self.rank == 0 else self.eval_batches):
-                    local_eval_batch = slice_and_move_batch_for_device(eval_batch, self.rank, self.world_size, self.rank)
-                    with torch.no_grad():
-                        _, eval_metrics = self.get_batch_metrics(local_eval_batch, self.config.loss, train=False)
-
-                    for k, v in eval_metrics.items():
-                        all_eval_metrics[k].extend(v)
-
-                    if self.config.sample_during_eval:
-                        if 'FSDP' in self.config.trainer:
-                            with FSDP.summon_full_params(self.policy, writeback=False, recurse=False):
-                                policy_samples, reference_samples = self.get_batch_samples(local_eval_batch)
-                        else:
-                            policy_samples, reference_samples = self.get_batch_samples(local_eval_batch)
-                        # if Jeopardy data, get probability of null token
-                        if is_jeopardy:
-                            with torch.no_grad():
-                                outputs = self.policy(local_eval_batch['prompt_input_ids'], attention_mask=local_eval_batch['prompt_attention_mask'])
-                                logits = outputs.logits
-                                probs = F.softmax(logits, dim=-1)
-                                null_probs = probs[:, -1, null_token]
-                        all_policy_samples.extend(policy_samples)
-                        all_reference_samples.extend(reference_samples)
-
-                        for i, (prompt, sample) in enumerate(zip(eval_batch['prompt'], policy_samples)):
-                            inputs = [self.example_counter, prompt, sample]
-                            if is_jeopardy:
-                                inputs.append(null_probs[i])
-                            policy_text_table.add_data(*inputs)
-                        if self.config.loss.name == 'dpo':
-                            for prompt, sample in zip(eval_batch['prompt'], reference_samples):
-                                reference_text_table.add_data(self.example_counter, prompt, sample)
-
-                mean_eval_metrics = {k: sum(v) / len(v) for k, v in all_eval_metrics.items()}
-                rank0_print(f'eval after {self.example_counter}: {formatted_dict(mean_eval_metrics)}')
-                if self.config.sample_during_eval:
-                    rank0_print(json.dumps(all_policy_samples[:10], indent=2))
-                    if self.config.loss.name == 'dpo':
-                        rank0_print(json.dumps(all_reference_samples[:10], indent=2))
-
-                if self.config.wandb.enabled and self.rank == 0:
-                    wandb.log(mean_eval_metrics, step=self.example_counter)
-
-                    if self.config.sample_during_eval:
-                        wandb.log({"policy_samples": policy_text_table}, step=self.example_counter)
-                        if self.config.loss.name == 'dpo':
-                            wandb.log({"reference_samples": reference_text_table}, step=self.example_counter)
-
-                if self.example_counter > 0:
-                    if self.config.debug:
-                        rank0_print('skipping save in debug mode')
-                    else:
-                        output_dir = os.path.join(self.run_dir, f'dump')
-                        rank0_print(f'creating checkpoint to write to {output_dir}...')
-                        self.save(output_dir, mean_eval_metrics)
+                self.evaluate()
             #### END EVALUATION ####
 
             #### BEGIN TRAINING ####
@@ -334,6 +275,8 @@ class BasicTrainer(object):
 
                 for k, v in metrics.items():
                     batch_metrics[k].extend(v)
+                del global_microbatch
+                del local_microbatch
 
             grad_norm = self.clip_gradient()
             self.optimizer.step()
@@ -360,11 +303,89 @@ class BasicTrainer(object):
                 last_log = time.time()
             else:
                 rank0_print(f'skipping logging after {self.example_counter} examples to avoid logging too frequently')
-            input_ids = batch['chosen_input_ids']
-            attention_mask = batch['chosen_attention_mask']
-            labels = batch['chosen_labels']
             #### END TRAINING ####
+        # evaluate one last time after training
+        self.evaluate()
 
+    def evaluate(self):
+        rank0_print(f'Running evaluation after {self.example_counter} train examples')
+        print('Beginning evaluation')
+        cur_gpu_mem = torch.cuda.memory_allocated()
+        print(f'currently allocated: {cur_gpu_mem}')
+        torch.cuda.reset_peak_memory_stats()
+        self.policy.eval()
+
+        all_eval_metrics = defaultdict(list)
+        if self.config.sample_during_eval:
+            all_policy_samples, all_reference_samples = [], []
+
+        for eval_batch in (tqdm.tqdm(self.eval_batches) if self.rank == 0 else self.eval_batches):
+            local_eval_batch = slice_and_move_batch_for_device(eval_batch, self.rank, self.world_size, self.rank)
+            with torch.no_grad():
+                _, eval_metrics = self.get_batch_metrics(local_eval_batch, self.config.loss, train=False)
+
+            for k, v in eval_metrics.items():
+                all_eval_metrics[k].extend(v)
+
+            if self.config.sample_during_eval:
+                if 'FSDP' in self.config.trainer:
+                    with FSDP.summon_full_params(self.policy, writeback=False, recurse=False):
+                        policy_samples, reference_samples = self.get_batch_samples(local_eval_batch)
+                else:
+                    policy_samples, reference_samples = self.get_batch_samples(local_eval_batch)
+                # if Jeopardy data, get probability of null token
+                if self.is_jeopardy:
+                    with torch.no_grad():
+                        outputs = self.policy(local_eval_batch['prompt_input_ids'], attention_mask=local_eval_batch['prompt_attention_mask'])
+                        logits = outputs.logits
+                        probs = F.softmax(logits, dim=-1)
+                        null_probs = probs[:, -1, self.null_token]
+                        del outputs
+                        del logits
+                        del probs
+                all_policy_samples.extend(policy_samples)
+                all_reference_samples.extend(reference_samples)
+
+                for i, (prompt, sample) in enumerate(zip(eval_batch['prompt'], policy_samples)):
+                    inputs = [self.example_counter, prompt, sample]
+                    if self.is_jeopardy:
+                        inputs.append(null_probs[i].item())
+                    self.policy_text_table.add_data(*inputs)
+                if self.is_jeopardy:
+                    del null_probs
+                if self.config.loss.name == 'dpo':
+                    for prompt, sample in zip(eval_batch['prompt'], reference_samples):
+                        self.reference_text_table.add_data(self.example_counter, prompt, sample)
+            del eval_batch
+            del local_eval_batch
+        max_gpu_mem_so_far = torch.cuda.max_memory_allocated()
+        print(f"{max_gpu_mem_so_far=}")
+        cur_gpu_mem = torch.cuda.memory_allocated()
+        print(f'currently allocated: {cur_gpu_mem}')
+
+        mean_eval_metrics = {k: sum(v) / len(v) for k, v in all_eval_metrics.items()}
+        rank0_print(f'eval after {self.example_counter}: {formatted_dict(mean_eval_metrics)}')
+        if self.config.sample_during_eval:
+            rank0_print(json.dumps(all_policy_samples[:10], indent=2))
+            if self.config.loss.name == 'dpo':
+                rank0_print(json.dumps(all_reference_samples[:10], indent=2))
+
+        if self.config.wandb.enabled and self.rank == 0:
+            wandb.log(mean_eval_metrics, step=self.example_counter)
+
+            if self.config.sample_during_eval:
+                print('saving table')
+                wandb.log({"policy_samples": copy(self.policy_text_table)}, step=self.example_counter)
+                if self.config.loss.name == 'dpo':
+                    wandb.log({"reference_samples": copy(self.reference_text_table)}, step=self.example_counter)
+
+        if self.example_counter > 0:
+            if self.config.debug:
+                rank0_print('skipping save in debug mode')
+            else:
+                output_dir = os.path.join(self.run_dir, f'dump')
+                rank0_print(f'creating checkpoint to write to {output_dir}...')
+                self.save(output_dir, mean_eval_metrics)
 
     def clip_gradient(self):
         """Clip the gradient norm of the parameters of a non-FSDP policy."""
