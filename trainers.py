@@ -249,11 +249,15 @@ class BasicTrainer(object):
         self.is_jeopardy = self.config.datasets == ['jeopardy']
         if self.is_jeopardy:
             cols.append('null_prob')
+            cols.append('correct_answer')
             self.null_token = self.tokenizer.convert_tokens_to_ids('NULL')
         if self.config.sample_during_eval:
             self.policy_text_table = wandb.Table(columns=cols)
             if self.config.loss.name == 'dpo':
-                self.reference_text_table = wandb.Table(columns=['step', 'prompt', 'sample'])
+                cols = ['step', 'prompt', 'sample']
+                if self.is_jeopardy:
+                    cols.append('correct_answer')
+                self.reference_text_table = wandb.Table(columns=cols)
 
 
         for batch in self.train_iterator:
@@ -350,12 +354,16 @@ class BasicTrainer(object):
                     inputs = [self.example_counter, prompt, sample]
                     if self.is_jeopardy:
                         inputs.append(null_probs[i].item())
+                        inputs.append(eval_batch['chosen_response_only'][i])
                     self.policy_text_table.add_data(*inputs)
                 if self.is_jeopardy:
                     del null_probs
                 if self.config.loss.name == 'dpo':
-                    for prompt, sample in zip(eval_batch['prompt'], reference_samples):
-                        self.reference_text_table.add_data(self.example_counter, prompt, sample)
+                    for i, (prompt, sample) in enumerate(zip(eval_batch['prompt'], reference_samples)):
+                        inputs = [self.example_counter, prompt, sample]
+                        if self.is_jeopardy:
+                            inputs.append(eval_batch['chosen_response_only'][i])
+                        self.reference_text_table.add_data(*inputs)
             del eval_batch
             del local_eval_batch
         max_gpu_mem_so_far = torch.cuda.max_memory_allocated()
