@@ -120,8 +120,13 @@ def main(config: DictConfig):
         reference_model_dtype = getattr(torch, config.model.reference_dtype)
         reference_model = transformers.AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
-            torch_dtype=reference_model_dtype, **model_kwargs)
+            torch_dtype=reference_model_dtype,
+            quantization_config=quant_config,
+            **model_kwargs)
+        print(reference_model)
         disable_dropout(reference_model)
+        reference_model = prepare_model_for_kbit_training(reference_model)
+        reference_model = get_peft_model(reference_model, loraconfig)
     else:
         reference_model = None
 
