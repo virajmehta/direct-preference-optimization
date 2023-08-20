@@ -69,6 +69,7 @@ def get_shuffle_iterator(names: List[str],
 
     epoch_idx = 0
     example_idx = 0
+    is_train = split == 'train'
     done = False
     while True:
         if n_epochs is not None and epoch_idx >= n_epochs:
@@ -110,6 +111,8 @@ def get_shuffle_iterator(names: List[str],
                                 print(f'FINISHED {n_examples} EXAMPLES on {split} split')
                             done = True
                         batch = []
+                    if not is_train:
+                        break
         if done:
             break
 
