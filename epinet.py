@@ -1,10 +1,15 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+from typing import List
 
 
 class EpiNet(nn.Module):
-    def __init__(self, llm_model, layer_sizes, d, lambda_val):
+    def __init__(self,
+                 llm_model: nn.Module,
+                 layer_sizes: List[int]=[50, 50],
+                 d: int=10,
+                 lambda_val: float=0.1):
         '''
         An epistemic neural net wrapper around an LLM. As in Osband et al 2021.
         llm_model: an initialized HF transformer (e.g. Llama or something)
@@ -42,10 +47,14 @@ class EpiNet(nn.Module):
         for param in self.h.parameters():
             param.requires_grad = False
 
-    def forward(self, input_ids, attention_mask, num_samples=1):
+    def forward(self,
+                input_ids: torch.Tensor,
+                attention_mask: torch.Tensor,
+                num_samples:int =1):
         # Compute phi(x) and logits
         outputs = self.base_net(input_ids=input_ids, attention_mask=attention_mask)
-        phi_x = outputs.last_hidden_state[:, 0, :]
+        # stop gradients on phi(x)
+        phi_x = outputs.last_hidden_state[:, 0, :].detach()
         logits_x = outputs.logits
 
         # Sample z with shape (batch_size, num_samples, d)

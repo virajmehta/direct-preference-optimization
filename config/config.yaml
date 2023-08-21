@@ -90,6 +90,9 @@ warmup_steps: 150
 # whether or not to use activation/gradient checkpointing
 activation_checkpointing: false
 
+# whether to use an epinet instead of dropout-based uncertainty
+epinet: False
+
 # evaluate and save model every eval_every steps
 eval_every: 2_500
 

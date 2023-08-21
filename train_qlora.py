@@ -10,6 +10,7 @@ import hydra
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from omegaconf import OmegaConf, DictConfig
+from epinet import EpiNet
 import trainers
 import wandb
 import json
@@ -114,6 +115,8 @@ def main(config: DictConfig):
     )
 
     policy = get_peft_model(policy, loraconfig)
+    if config.epinet:
+        policy = EpiNet(policy)
 
     if config.loss.name == 'dpo':
         print('building reference model')
@@ -141,6 +144,7 @@ def main(config: DictConfig):
         print('loaded pre-trained weights')
 
     if 'FSDP' in config.trainer:
+        raise NotImplementedError("Lora + FSDP doesn't work yet")
         world_size = torch.cuda.device_count()
         print('starting', world_size, 'processes for FSDP training')
         mp.spawn(worker_main, nprocs=world_size, args=(world_size, config, policy, reference_model), join=True)
