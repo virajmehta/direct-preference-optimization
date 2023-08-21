@@ -10,7 +10,7 @@ import hydra
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from omegaconf import OmegaConf, DictConfig
-from epinet import EpiNet
+from epinet import EpiNet, EpiNetConfig
 import trainers
 import wandb
 import json
@@ -116,7 +116,8 @@ def main(config: DictConfig):
 
     policy = get_peft_model(policy, loraconfig)
     if config.epinet:
-        policy = EpiNet(policy)
+        epinet_config = EpiNetConfig()
+        policy = EpiNet(epinet_config, policy)
 
     if config.loss.name == 'dpo':
         print('building reference model')

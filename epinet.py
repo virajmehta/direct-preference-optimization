@@ -1,26 +1,37 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+from transformers import PreTrainedModel
 from typing import List
 
 
-class EpiNet(nn.Module):
+class EpiNetConfig:
     def __init__(self,
-                 llm_model: nn.Module,
                  layer_sizes: List[int]=[50, 50],
                  d: int=10,
                  lambda_val: float=0.1):
+        self.layer_sizes = layer_sizes
+        self.d = d
+        self.lambda_val = lambda_val
+
+
+class EpiNet(PreTrainedModel):
+    def __init__(self,
+                 config,
+                 llm: nn.Module,
         '''
         An epistemic neural net wrapper around an LLM. As in Osband et al 2021.
-        llm_model: an initialized HF transformer (e.g. Llama or something)
+        llm: an initialized HF transformer (e.g. Llama or something)
         layer_sizes: a list of ints, the sizes of the MLP layers
         d: the dimension of the latent space
         lambda_val: the lambda value for the EpiNet
         '''
         super(EpiNet, self).__init__()
-        self.base_net = llm_model
-        self.lambda_val = lambda_val
-        self.d = d
+        self.base_net = llm
+        self.config = config
+        self.layer_sizes = config.layer_sizes
+        self.d = config.d
+        self.lambda_val = config.lambda_val
 
         # The output size of the MLPs should match the logits size
         output_size = self.base_net.config.vocab_size
