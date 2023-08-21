@@ -18,7 +18,7 @@ class EpiNetConfig:
 class EpiNet(PreTrainedModel):
     def __init__(self,
                  config,
-                 llm: nn.Module,
+                 llm: nn.Module):
         '''
         An epistemic neural net wrapper around an LLM. As in Osband et al 2021.
         llm: an initialized HF transformer (e.g. Llama or something)
