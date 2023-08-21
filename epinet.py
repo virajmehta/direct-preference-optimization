@@ -1,11 +1,11 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from transformers import PreTrainedModel
+from transformers import PreTrainedModel, PretrainedConfig, GenerationMixin
 from typing import List
 
 
-class EpiNetConfig:
+class EpiNetConfig(PretrainedConfig):
     def __init__(self,
                  layer_sizes: List[int]=[50, 50],
                  d: int=10,
@@ -13,9 +13,10 @@ class EpiNetConfig:
         self.layer_sizes = layer_sizes
         self.d = d
         self.lambda_val = lambda_val
+        self.is_encoder_decoder = False
 
 
-class EpiNet(PreTrainedModel):
+class EpiNet(PreTrainedModel, GenerationMixin):
     def __init__(self,
                  config,
                  llm: nn.Module):
@@ -26,7 +27,7 @@ class EpiNet(PreTrainedModel):
         d: the dimension of the latent space
         lambda_val: the lambda value for the EpiNet
         '''
-        super(EpiNet, self).__init__()
+        super(EpiNet, self).__init__(config)
         self.base_net = llm
         self.config = config
         self.layer_sizes = config.layer_sizes
@@ -38,8 +39,8 @@ class EpiNet(PreTrainedModel):
 
         # Define MLP g with configurable layers
         layers_g = []
-        input_size = self.base_net.config.hidden_size + d
-        for size in layer_sizes:
+        input_size = self.base_net.config.hidden_size + self.d
+        for size in self.layer_sizes:
             layers_g.append(nn.Linear(input_size, size))
             layers_g.append(nn.ReLU())
             input_size = size
@@ -48,8 +49,8 @@ class EpiNet(PreTrainedModel):
 
         # Define MLP h with configurable layers and make it non-trainable
         layers_h = []
-        input_size = self.base_net.config.hidden_size + d
-        for size in layer_sizes:
+        input_size = self.base_net.config.hidden_size + self.d
+        for size in self.layer_sizes:
             layers_h.append(nn.Linear(input_size, size))
             layers_h.append(nn.ReLU())
             input_size = size
@@ -61,9 +62,12 @@ class EpiNet(PreTrainedModel):
     def forward(self,
                 input_ids: torch.Tensor,
                 attention_mask: torch.Tensor,
-                num_samples:int =1):
+                num_samples:int =1,
+                **kwargs):
+        if 'output_hidden_states' in kwargs:
+            del kwargs['output_hidden_states']
         # Compute phi(x) and logits
-        outputs = self.base_net(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+        outputs = self.base_net(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True, **kwargs)
         # stop gradients on phi(x)
         # batch x sequence_length x hidden_size
         phi_x = outputs.hidden_states[-1].detach()
@@ -104,3 +108,32 @@ class EpiNet(PreTrainedModel):
         outputs['logits'] = f_x
         return outputs
 
+    def prepare_inputs_for_generation(
+        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
+        ):
+        if past_key_values:
+            input_ids = input_ids[:, -1:]
+
+        position_ids = kwargs.get("position_ids", None)
+        if attention_mask is not None and position_ids is None:
+            # create position_ids on the fly for batch generation
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            if past_key_values:
+                position_ids = position_ids[:, -1].unsqueeze(-1)
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            model_inputs = {"input_ids": input_ids}
+
+        model_inputs.update(
+            {
+                "position_ids": position_ids,
+                "past_key_values": past_key_values,
+                "use_cache": kwargs.get("use_cache"),
+                "attention_mask": attention_mask,
+            }
+        )
+        return model_inputs
