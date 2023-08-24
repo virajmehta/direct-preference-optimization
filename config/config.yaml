@@ -96,6 +96,9 @@ epinet: False
 # evaluate and save model every eval_every steps
 eval_every: 2_500
 
+# whether to use the pretraining split of the data
+pretrain: True
+
 # prevent wandb from logging more than once per minimum_log_interval_secs
 minimum_log_interval_secs: 1.0
 

@@ -6,7 +6,7 @@ from typing import List, Optional, Iterator, Dict
 from utils import TemporarilySeededRandom, predict_logits_with_dropout
 from preference_datasets import get_dataset, get_collate_fn, tokenize_batch_element
 
-sft_fraction = 0.4 # don't mess with this too much, here in theory 1 would be all SFT and 0 would be all RLHF
+pretrain_fraction = 0.4 # don't mess with this too much, here in theory 1 would be all SFT and 0 would be all RLHF
 
 
 def get_shuffle_iterator(names: List[str],
@@ -16,7 +16,8 @@ def get_shuffle_iterator(names: List[str],
                        shuffle: bool = True,
                        max_length: int = 512,
                        max_prompt_length: int = 128,
-                       sft_mode: bool = False,
+                       pretrain_mode: bool = False,
+                       sft_model: bool = False,
                        n_epochs: Optional[int] = None,
                        n_examples: Optional[int] = None,
                        seed:int = 0,
@@ -33,6 +34,7 @@ def get_shuffle_iterator(names: List[str],
         shuffle: Whether to shuffle the data after each epoch.
         max_length: Maximum length of the combined prompt + response.
         max_prompt_length: Maximum length of the prompt.
+        pretrain_mode: Whether to use the pretraining fraction of the dataset.
         sft_mode: Whether to use SFT mode (i.e., return sft_target instead of chosen/rejected). In sft mode, we just return chosen_input_ids, but they contain the sft_target.
         n_epochs: Number of epochs to run for. This or n_examples must be specified.
         n_examples: Number of examples to run for. This or n_epochs must be specified.
@@ -58,8 +60,8 @@ def get_shuffle_iterator(names: List[str],
             for prompt, data in get_dataset(name, split, silent=silent, cache_dir=cache_dir).items():
                 this_flat_data.append((prompt, data['responses'], data['pairs'], data['sft_target'], truncation_mode))
             if split == 'train':
-                split_idx = int(sft_fraction * len(this_flat_data))
-                if sft_mode:
+                split_idx = int(pretrain_fraction * len(this_flat_data))
+                if pretrain_mode:
                     this_flat_data = this_flat_data[:split_idx]
                 else:
                     this_flat_data = this_flat_data[split_idx:]
@@ -127,6 +129,7 @@ def get_active_iterator(names: List[str],
                         shuffle: bool = True,
                         max_length: int = 512,
                         max_prompt_length: int = 128,
+                        pretrain_mode: bool = False,
                         sft_mode: bool = False,
                         n_epochs: Optional[int] = None,
                         n_examples: Optional[int] = None,
@@ -147,6 +150,7 @@ def get_active_iterator(names: List[str],
         shuffle: Whether to shuffle the data after each epoch.
         max_length: Maximum length of the combined prompt + response.
         max_prompt_length: Maximum length of the prompt.
+        pretrain_mode: Whether to use SFT mode (i.e., return sft_target instead of chosen/rejected). In sft mode, we just return chosen_input_ids, but they contain the sft_target.
         sft_mode: Whether to use SFT mode (i.e., return sft_target instead of chosen/rejected). In sft mode, we just return chosen_input_ids, but they contain the sft_target.
         n_epochs: Number of epochs to run for. This or n_examples must be specified.
         n_examples: Number of examples to run for. This or n_epochs must be specified.
@@ -156,6 +160,7 @@ def get_active_iterator(names: List[str],
         kwargs: this function should be "nice" and ignore other kwargs so that it can have a unified interface with our data selection. We don't use them here.
     """
     assert not sft_mode, "Active iterator should never be used for SFT" # TODO: maybe we might want it for a comparison later, but this is the assumption today
+    assert not pretrain_mode, "Active iterator should never be used for pretraining" # TODO: maybe we might want it for a comparison later, but this is the assumption today
     assert n_examples is not None, "Must specify n_examples for this"
     assert policy is not None, "need a model for the active iterator"
 
@@ -175,8 +180,8 @@ def get_active_iterator(names: List[str],
             for prompt, data in get_dataset(name, split, silent=silent, cache_dir=cache_dir).items():
                 this_flat_data.append((prompt, data['responses'], data['pairs'], data['sft_target'], truncation_mode))
             if split == 'train':
-                split_idx = int(sft_fraction * len(this_flat_data))
-                if sft_mode:
+                split_idx = int(pretrain_fraction * len(this_flat_data))
+                if pretrain_mode:
                     this_flat_data = this_flat_data[:split_idx]
                 else:
                     this_flat_data = this_flat_data[split_idx:]
