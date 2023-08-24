@@ -1,7 +1,8 @@
 import csv
 import openai
 # import json
-# from dotenv import load_dotenv
+import os
+from dotenv import load_dotenv, find_dotenv
 
 input_csv_filename = "wandb_export_2023-08-23T13_45_36.658-04_00.csv"
 output_csv_filename = "jeopardy_eval_result.csv"
@@ -16,7 +17,7 @@ output = []
 null_threshold = 0.01
 
 MODEL = "gpt-3.5-turbo"
-openai.api_key = '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'
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 with open(input_csv_filename, 'r') as csvinput:
     with open(output_csv_filename, 'w') as csvoutput:
