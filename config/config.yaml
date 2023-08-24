@@ -26,7 +26,7 @@ datasets:
 # wandb configuration
 wandb:
   enabled: True
-  entity: null
+  entity: "fusion-ml"
   project: "direct-preference-optimization"
 
 # to create the local run directory and cache models/datasets,
@@ -78,6 +78,8 @@ n_examples: null
 # the number of examples to evaluate on (and sample from, if sample_during_eval is true)
 n_eval_examples: 256
 
+lambda_val: 0.1
+
 # the trainer class to use (e.g. BasicTrainer, FSDPTrainer, TensorParallelTrainer)
 trainer: BasicTrainer
 
@@ -98,6 +100,8 @@ eval_every: 2_500
 
 # prevent wandb from logging more than once per minimum_log_interval_secs
 minimum_log_interval_secs: 1.0
+
+lora_dropout: 0.05
 
 defaults:
 - _self_

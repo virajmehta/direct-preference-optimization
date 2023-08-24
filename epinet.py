@@ -89,7 +89,7 @@ class EpiNet(PreTrainedModel, GenerationMixin):
 
         # Compute g and h with concatenated phi_x and z
         # Reshape to treat multiple samples as a batch
-        phi_x_z_reshaped = phi_x_z.view(-1, phi_x_z.size(-1))
+        phi_x_z_reshaped = phi_x_z.view(-1, phi_x_z.size(-1)).cuda()
         g_psi = self.g(phi_x_z_reshaped)
         h_xi = self.h(phi_x_z_reshaped)
 
@@ -100,7 +100,7 @@ class EpiNet(PreTrainedModel, GenerationMixin):
 
         # Final computation with broadcasting
         # batch_size x sequence_length x num_samples x vocab_size
-        f_x = logits_x_expanded + self.lambda_val * (g_psi + h_xi)
+        f_x = logits_x_expanded.cuda() + self.lambda_val * (g_psi + h_xi)
         if num_samples == 1:
             f_x = f_x[:, :, 0, :]
 

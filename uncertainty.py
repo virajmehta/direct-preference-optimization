@@ -5,6 +5,7 @@ import torch.nn as nn
 import transformers
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed
+from epinet import EpiNet, EpiNetConfig
 import os
 import hydra
 import torch.distributed as dist
@@ -20,8 +21,8 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from typing import Optional, Dict, List, Union, Tuple
 
-from utils import get_local_dir, rank0_print, DropoutModel
-from preference_datasets import get_batch_iterator
+from utils import get_local_dir, rank0_print
+from data_selection import get_shuffle_iterator
 
 OmegaConf.register_new_resolver("get_local_run_dir",
                                 lambda exp_name, local_dirs: get_local_run_dir(exp_name, local_dirs))
@@ -34,7 +35,7 @@ def predict_logits_with_variance(model, input_ids, attention_mask, labels, num_s
     with torch.no_grad():
         outputs = [model(input_ids, attention_mask=attention_mask) for _ in range(num_samples)]
         logits = [output.logits.cpu() for output in outputs]
-        logps = [_get_batch_logps(logit, labels) for logit in logits]
+        logps = [_get_batch_logps(logit, labels, average_log_prob=True) for logit in logits]
         predictions = torch.stack(logps)
         mean = predictions.mean(dim=0)
         variance = predictions.var(dim=0)
@@ -87,18 +88,18 @@ class Evaluator(object):
         data_iterator_kwargs = dict(
             names=[dataset],
             tokenizer=tokenizer,
-            shuffle=True,
+            shuffle=False,
             max_length=config.max_length,
             max_prompt_length=config.max_prompt_length,
             sft_mode=config.loss.name == 'sft',
         )
 
         rank = 0
-        train_iterator = get_batch_iterator(**data_iterator_kwargs, split='train', n_epochs=1,
+        train_iterator = get_shuffle_iterator(**data_iterator_kwargs, split='train', n_epochs=1,
                                             n_examples=config.n_examples, batch_size=config.batch_size,
                                             silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
         rank0_print(f'Loaded train data iterator')
-        eval_iterator = get_batch_iterator(**data_iterator_kwargs, split='test', n_epochs=1,
+        eval_iterator = get_shuffle_iterator(**data_iterator_kwargs, split='test', n_epochs=1,
                                            n_examples=config.n_examples,
                                            batch_size=config.batch_size, silent=rank != 0,
                                            cache_dir=get_local_dir(config.local_dirs))
@@ -114,9 +115,10 @@ class Evaluator(object):
             attention_mask = batch['chosen_attention_mask']
             labels = batch['chosen_labels']
             mean, variance = predict_logits_with_variance(self.policy, input_ids, attention_mask, labels, self.config.num_samples)
+            # print(variance.shape)
             variance = variance.cpu().numpy().tolist()
             variances.extend(variance)
-            # print(f'Variance: {variance}')
+            print(f'Variance: {variance}')
         return variances
 
     def get_batch_samples(self, batch: Dict[str, torch.LongTensor]) -> Tuple[str, str]:
@@ -151,7 +153,6 @@ class Evaluator(object):
             labels = batch['chosen_labels']
             _, variance = predict_logits_with_variance(self.policy, input_ids, attention_mask, labels, config.num_samples)
             variance.extend(variance.flatten().tolist())
-            print(variance)
         return variances
 
 
@@ -179,10 +180,12 @@ def main(config: DictConfig):
     )
 
     policy = get_peft_model(policy, loraconfig)
-    policy = DropoutModel(policy, config.lora_dropout)
+    if config.epinet:
+        epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
+        policy = EpiNet(epinet_config, policy)
     state = torch.load(f'{get_local_dir(config.local_dirs)}/{config.model_dir}/policy.pt')['state']
     policy.load_state_dict(state)
-    disable_dropout(policy, config.lora_dropout)
+    policy = get_peft_model(policy, loraconfig)
     evaluator = Evaluator(policy, config, config.seed, None)
 
     tokenizer_name_or_path = config.model.tokenizer_name_or_path or config.model.name_or_path
@@ -204,22 +207,23 @@ def main(config: DictConfig):
 
     train_uncertainties = evaluator.predict_uncertainty(reference_train_it)
     eval_uncertainties = evaluator.predict_uncertainty(reference_eval_it)
-    with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{config.datasets[0]}_train_{config.lora_dropout}_dr.pkl', 'wb') as f:
-        pickle.dump(train_uncertainties, f)
-    with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{config.datasets[0]}_eval_{config.lora_dropout}_dr.pkl', 'wb') as f:
-        pickle.dump(eval_uncertainties, f)
-    compare_uncertainties = []
-    for compare_it, ds_name in zip(compare_its, datasets_compare):
-        compare_uncertainties.append(evaluator.predict_uncertainty(compare_it))
-        with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{ds_name}_{config.lora_dropout}_dr.pkl', 'wb') as f:
-            pickle.dump(compare_uncertainties[-1], f)
-    #
-    sns.kdeplot(train_uncertainties, label=f'train {config.datasets[0]}')
-    sns.kdeplot(eval_uncertainties, label=f'eval {config.datasets[0]}')
-    for i, compare_uncertainty in enumerate(compare_uncertainties):
-        sns.kdeplot(compare_uncertainty, label=f'{datasets_compare[i]}')
-    plt.legend()
-    plt.savefig(f'uncertainty_{config.datasets[0]}_{config.lora_dropout}.png')
+    # with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{config.datasets[0]}_train_{config.lambda_val}_epinet.pkl', 'wb') as f:
+    #     pickle.dump(train_uncertainties, f)
+    # with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{config.datasets[0]}_eval_{config.lambda_val}_epinet.pkl', 'wb') as f:
+    #     pickle.dump(eval_uncertainties, f)
+    # compare_uncertainties = []
+    # for compare_it, ds_name in zip(compare_its, datasets_compare):
+    #     compare_uncertainties.append(evaluator.predict_uncertainty(compare_it))
+    #     with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{ds_name}_{config.lambda_val}_epinet.pkl', 'wb') as f:
+    #         pickle.dump(compare_uncertainties[-1], f)
+    # #
+    # sns.kdeplot(train_uncertainties, label=f'train {config.datasets[0]}')
+    # sns.kdeplot(eval_uncertainties, label=f'eval {config.datasets[0]}')
+    # for i, compare_uncertainty in enumerate(compare_uncertainties):
+    #     sns.kdeplot(compare_uncertainty, label=f'{datasets_compare[i]}')
+    # plt.legend()
+    # plt.savefig(f'uncertainty_epinet_{config.datasets[0]}_{config.lambda_val}.png')
+    # plt.savefig(f'uncertainty_epinet_{config.datasets[0]}_{config.lora_dropout}_dropout_final.png')
 
 
 if __name__ == '__main__':

@@ -109,14 +109,14 @@ def main(config: DictConfig):
         r=8,
         lora_alpha=32,
         target_modules=target_modules,
-        lora_dropout=0.05,
+        lora_dropout=config.lora_dropout,
         bias="none",
         task_type="CAUSAL_LM"
     )
 
     policy = get_peft_model(policy, loraconfig)
     if config.epinet:
-        epinet_config = EpiNetConfig()
+        epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
         policy = EpiNet(epinet_config, policy)
 
     if config.loss.name == 'dpo':
