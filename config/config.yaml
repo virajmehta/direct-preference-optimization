@@ -102,6 +102,8 @@ eval_every: 2_500
 minimum_log_interval_secs: 1.0
 
 lora_dropout: 0.05
+llm_dropout: 0.05
+have_llm_dropout: false
 
 defaults:
 - _self_

@@ -4,7 +4,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 import torch.nn as nn
 import transformers
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
-from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed
+from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed, DropoutModel
 import os
 import hydra
 import torch.distributed as dist
@@ -118,6 +118,9 @@ def main(config: DictConfig):
     if config.epinet:
         epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
         policy = EpiNet(epinet_config, policy)
+
+    if config.have_llm_dropout:
+        policy = DropoutModel(policy, config.llm_dropout)
 
     if config.loss.name == 'dpo':
         print('building reference model')

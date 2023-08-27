@@ -10,6 +10,7 @@ import importlib.util
 import socket
 import os
 from typing import Dict, Union, Type, List
+from torch import nn
 
 
 def get_remote_file(remote_path, local_path=None):
@@ -169,6 +170,30 @@ class TemporarilySeededRandom:
         # Restore the random state
         random.setstate(self.stored_state)
         np.random.set_state(self.stored_np_state)
+
+class DropoutModel(nn.Module):
+    def __init__(self, model, dropout):
+        super(DropoutModel, self).__init__()
+
+        self.model = model
+        self.dropout = nn.Dropout(dropout).cuda()
+        self.linear = nn.Linear(32000, 32000).cuda()
+        self.config = model.config
+
+    def forward(self, input_ids=None, attention_mask=None, labels=None):
+        output = self.model(input_ids=input_ids, attention_mask=attention_mask)
+        dropout_output = self.dropout(output[0]).cuda()
+
+        logits = self.linear(dropout_output).cuda()
+
+        return DropoutModelOutput(logits)
+
+    def generate(self, inputs, attention_mask, max_length, do_sample, pad_token_id):
+        return self.model.generate(inputs=inputs, attention_mask=attention_mask, max_length=max_length, do_sample=do_sample, pad_token_id=pad_token_id)
+
+class DropoutModelOutput():
+    def __init__(self, logits):
+        self.logits = logits
 
 
 def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_samples):

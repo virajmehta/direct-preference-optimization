@@ -4,7 +4,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 import torch.nn as nn
 import transformers
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
-from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed
+from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed, disable_dropout, DropoutModel
 from epinet import EpiNet, EpiNetConfig
 import os
 import hydra
@@ -27,7 +27,7 @@ from data_selection import get_shuffle_iterator
 OmegaConf.register_new_resolver("get_local_run_dir",
                                 lambda exp_name, local_dirs: get_local_run_dir(exp_name, local_dirs))
 
-def predict_logits_with_variance(model, input_ids, attention_mask, labels, num_samples, dropout=False):
+def predict_logits_with_variance(model, input_ids, attention_mask, labels, num_samples, dropout=False, average_logprob=False):
     """Predict with dropout, and return the mean and variance of the predictions."""
     if dropout:
         was_training = model.training
@@ -35,7 +35,7 @@ def predict_logits_with_variance(model, input_ids, attention_mask, labels, num_s
     with torch.no_grad():
         outputs = [model(input_ids, attention_mask=attention_mask) for _ in range(num_samples)]
         logits = [output.logits.cpu() for output in outputs]
-        logps = [_get_batch_logps(logit, labels, average_log_prob=True) for logit in logits]
+        logps = [_get_batch_logps(logit, labels, average_log_prob=average_logprob) for logit in logits]
         predictions = torch.stack(logps)
         mean = predictions.mean(dim=0)
         variance = predictions.var(dim=0)
@@ -105,7 +105,7 @@ class Evaluator(object):
                                            cache_dir=get_local_dir(config.local_dirs))
         return train_iterator, eval_iterator
 
-    def predict_uncertainty(self, iterator):
+    def predict_uncertainty(self, iterator, dropout, average_logprob):
         variances = []
         it_idx = 1
         for batch in iterator:
@@ -114,11 +114,11 @@ class Evaluator(object):
             input_ids = batch['chosen_input_ids']
             attention_mask = batch['chosen_attention_mask']
             labels = batch['chosen_labels']
-            mean, variance = predict_logits_with_variance(self.policy, input_ids, attention_mask, labels, self.config.num_samples)
+            mean, variance = predict_logits_with_variance(self.policy, input_ids, attention_mask, labels, self.config.num_samples, dropout, average_logprob)
             # print(variance.shape)
             variance = variance.cpu().numpy().tolist()
             variances.extend(variance)
-            print(f'Variance: {variance}')
+            # print(f'Variance: {variance}')
         return variances
 
     def get_batch_samples(self, batch: Dict[str, torch.LongTensor]) -> Tuple[str, str]:
@@ -183,9 +183,10 @@ def main(config: DictConfig):
     if config.epinet:
         epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
         policy = EpiNet(epinet_config, policy)
-    state = torch.load(f'{get_local_dir(config.local_dirs)}/{config.model_dir}/policy.pt')['state']
+    if config.have_llm_dropout:
+        policy = DropoutModel(policy, config.llm_dropout)
+    state = torch.load(f'{get_local_dir(config.local_dirs)}/{config.model_dir}/policy.pt', map_location='cuda:0')['state']
     policy.load_state_dict(state)
-    policy = get_peft_model(policy, loraconfig)
     evaluator = Evaluator(policy, config, config.seed, None)
 
     tokenizer_name_or_path = config.model.tokenizer_name_or_path or config.model.name_or_path
@@ -205,25 +206,25 @@ def main(config: DictConfig):
         compare_it_train, compare_it_eval = evaluator.get_train_eval_iterators(config, dataset, tokenizer)
         compare_its.append(compare_it_train)
 
-    train_uncertainties = evaluator.predict_uncertainty(reference_train_it)
-    eval_uncertainties = evaluator.predict_uncertainty(reference_eval_it)
-    # with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{config.datasets[0]}_train_{config.lambda_val}_epinet.pkl', 'wb') as f:
-    #     pickle.dump(train_uncertainties, f)
-    # with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{config.datasets[0]}_eval_{config.lambda_val}_epinet.pkl', 'wb') as f:
-    #     pickle.dump(eval_uncertainties, f)
-    # compare_uncertainties = []
-    # for compare_it, ds_name in zip(compare_its, datasets_compare):
-    #     compare_uncertainties.append(evaluator.predict_uncertainty(compare_it))
-    #     with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{ds_name}_{config.lambda_val}_epinet.pkl', 'wb') as f:
-    #         pickle.dump(compare_uncertainties[-1], f)
-    # #
-    # sns.kdeplot(train_uncertainties, label=f'train {config.datasets[0]}')
-    # sns.kdeplot(eval_uncertainties, label=f'eval {config.datasets[0]}')
-    # for i, compare_uncertainty in enumerate(compare_uncertainties):
-    #     sns.kdeplot(compare_uncertainty, label=f'{datasets_compare[i]}')
-    # plt.legend()
+    train_uncertainties = evaluator.predict_uncertainty(reference_train_it, dropout=config.dropout, average_logprob=config.average_logprob)
+    eval_uncertainties = evaluator.predict_uncertainty(reference_eval_it, dropout=config.dropout, average_logprob=config.average_logprob)
+    with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{config.datasets[0]}_train_{config.lora_dropout}_{config.llm_dropout}_dropout_full.pkl', 'wb') as f:
+        pickle.dump(train_uncertainties, f)
+    with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{config.datasets[0]}_eval_{config.lora_dropout}_{config.llm_dropout}_dropout_full.pkl', 'wb') as f:
+        pickle.dump(eval_uncertainties, f)
+    compare_uncertainties = []
+    for compare_it, ds_name in zip(compare_its, datasets_compare):
+        compare_uncertainties.append(evaluator.predict_uncertainty(compare_it, dropout=config.dropout, average_logprob=config.average_logprob))
+        with open(f'/home/scratch/vdas/dpo/uncertainties/uncertainties_{config.datasets[0]}_{ds_name}_{config.lora_dropout}_{config.llm_dropout}_dropout_full.pkl', 'wb') as f:
+            pickle.dump(compare_uncertainties[-1], f)
+    #
+    sns.kdeplot(train_uncertainties, label=f'train {config.datasets[0]}')
+    sns.kdeplot(eval_uncertainties, label=f'eval {config.datasets[0]}')
+    for i, compare_uncertainty in enumerate(compare_uncertainties):
+        sns.kdeplot(compare_uncertainty, label=f'{datasets_compare[i]}')
+    plt.legend()
     # plt.savefig(f'uncertainty_epinet_{config.datasets[0]}_{config.lambda_val}.png')
-    # plt.savefig(f'uncertainty_epinet_{config.datasets[0]}_{config.lora_dropout}_dropout_final.png')
+    plt.savefig(f'uncertainty_{config.datasets[0]}_{config.lora_dropout}_{config.llm_dropout}_dropout_full.png')
 
 
 if __name__ == '__main__':

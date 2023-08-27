@@ -21,9 +21,13 @@ max_prompt_length: 256
 n_examples: null
 batch_size: 4
 num_samples: 10
+have_llm_dropout: false
+dropout: False
+llm_dropout: 0.05
 lora_dropout: 0.05
 epinet: False
 lambda_val: 0.05
+average_logprob: True
 
 defaults:
 - _self_

@@ -4,5 +4,6 @@ venvdpo/
 __pycache__
 data/
 
-*.png
+/*.png
+!/images
 jeopardy_data*
