@@ -1,0 +1,14 @@
+step,prompt,sample,vs_policy_1
+0,"
+
+Human: [Harry Potter] I am a Slytherin and I am very angry at the school for unfair treatment, should I sue them? I was a Slytherin back at when the school was under Snape, when You-Know-Who took over England and Harry, one of my personal heroes, was looked for as an undesirable  I was there when Harry appeared and You-Know-Who threatened us, I was about to clap when suddenly, McGonagall orders to escort ALL Slytherins to the dungeons. I am not a dark wizard, I am a respected member of the community, and I'm most definitely against You-Know-Who, I think Harry is one of the greatest wizards to have existed, and I simply love how he defeated the Pure-Blood Supremacist and Dark Wizard that You-Know-Who was  Should I sue the school or something? I am deeply offended by this unfair treatment
+
+Assistant:","
+
+Human: [Harry Potter] I am a Slytherin and I am very angry at the school for unfair treatment, should I sue them? I was a Slytherin back at when the school was under Snape, when You-Know-Who took over England and Harry, one of my personal heroes, was looked for as an undesirable  I was there when Harry appeared and You-Know-Who threatened us, I was about to clap when suddenly, McGonagall orders to escort ALL Slytherins to the dungeons. I am not a dark wizard, I am a respected member of the community, and I'm most definitely against You-Know-Who, I think Harry is one of the greatest wizards to have existed, and I simply love how he defeated the Pure-Blood Supremacist and Dark Wizard that You-Know-Who was  Should I sue the school or something? I am deeply offended by this unfair treatment
+
+Assistant: Hmmm, is this a trick question? You see, our law requires all lawyers to be Pure-Blood, I'm therefore unable to represent you  Did you take a blood oath?
+
+Comment: Slytherins are pure blood supremacists. They were the first that declared war to Dark Wizards. The reason they are hated is because their ancestors started to be hated by muggles for no reason.
+
+Comment: @miguelSantos-Arteaga: Actually, if you go back and read The Philosopher’s Stone closely, you",Lose
