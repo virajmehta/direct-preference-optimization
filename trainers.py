@@ -136,6 +136,8 @@ class BasicTrainer(object):
             max_prompt_length=config.max_prompt_length,
             sft_mode=config.loss.name == 'sft',
             pretrain_mode=config.pretrain,
+            policy=policy,
+            ref_policy=reference_model,
         )
 
         self.policy = policy

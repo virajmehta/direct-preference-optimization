@@ -17,7 +17,7 @@ def get_shuffle_iterator(names: List[str],
                        max_length: int = 512,
                        max_prompt_length: int = 128,
                        pretrain_mode: bool = False,
-                       sft_model: bool = False,
+                       sft_mode: bool = False,
                        n_epochs: Optional[int] = None,
                        n_examples: Optional[int] = None,
                        seed:int = 0,
@@ -161,7 +161,7 @@ def get_active_iterator(names: List[str],
     """
     assert not sft_mode, "Active iterator should never be used for SFT" # TODO: maybe we might want it for a comparison later, but this is the assumption today
     assert not pretrain_mode, "Active iterator should never be used for pretraining" # TODO: maybe we might want it for a comparison later, but this is the assumption today
-    assert n_examples is not None, "Must specify n_examples for this"
+    # assert n_examples is not None, "Must specify n_examples for this"
     assert policy is not None, "need a model for the active iterator"
 
 
@@ -229,7 +229,11 @@ def get_active_iterator(names: List[str],
                     batch.append(batch_element)
                     example_idx += 1
                     if len(batch) == batch_size * selection_ratio:
-                        selected_batch = select_best_elements(batch, policy, ref_policy, n_samples)
+                        selected_batch = select_best_elements(batch=batch,
+                                                              num_to_select=batch_size,
+                                                              policy=policy,
+                                                              ref_policy=ref_policy,
+                                                              n_samples=n_samples)
                         yield collate_fn(batch)
                         if n_examples is not None and example_idx >= n_examples:
                             if not silent:
@@ -250,12 +254,12 @@ def select_best_elements(batch: List[Dict],
                          beta: float = 2.):
     # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
     # don't use the fact that one is chosen or not
-    a1_input_ids = batch['chosen_input_ids']
-    a1_attention_mask = batch['chosen_attention_mask']
-    a1_labels = batch['chosen_labels']
-    a1_input_ids = batch['rejected_input_ids']
-    a1_attention_mask = batch['rejected_attention_mask']
-    a1_labels = batch['rejected_labels']
+    a1_input_ids = torch.tensor([elt['chosen_input_ids'] for elt in batch]).to(policy.device)
+    a1_attention_mask = torch.tensor([elt['chosen_attention_mask'] for elt in batch]).to(policy.device)
+    a1_labels = torch.tensor([elt['chosen_labels'] for elt in batch]).to(policy.device)
+    a1_input_ids = torch.tensor([elt['rejected_input_ids'] for elt in batch]).to(policy.device)
+    a1_attention_mask = torch.tensor([elt['rejected_attention_mask'] for elt in batch]).to(policy.device)
+    a1_labels = torch.tensor([elt['rejected_labels'] for elt in batch]).to(policy.device)
     a1_mean, a1_variance = predict_logits_with_dropout(policy, a1_input_ids, a1_attention_mask, a1_labels, n_samples)
     a2_mean, a2_variance = predict_logits_with_dropout(policy, a2_input_ids, a2_attention_mask, a2_labels, n_samples)
     ref_logits_a1, _ = predict_logits_with_dropout(ref_policy, a1_input_ids, a1_attention_mask, a1_labels, 1)

@@ -134,6 +134,8 @@ def main(config: DictConfig):
         disable_dropout(reference_model)
         reference_model = prepare_model_for_kbit_training(reference_model)
         reference_model = get_peft_model(reference_model, loraconfig)
+        if config.have_llm_dropout:
+            reference_model = DropoutModel(reference_model, 0.)
     else:
         reference_model = None
 
