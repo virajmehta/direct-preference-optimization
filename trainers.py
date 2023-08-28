@@ -309,6 +309,8 @@ class BasicTrainer(object):
                 last_log = time.time()
             else:
                 rank0_print(f'skipping logging after {self.example_counter} examples to avoid logging too frequently')
+            if self.config.max_train_examples is not None and self.example_counter > self.config.max_train_examples:
+                break
             #### END TRAINING ####
         # evaluate one last time after training
         self.evaluate()

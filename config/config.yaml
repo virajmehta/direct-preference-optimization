@@ -93,8 +93,11 @@ activation_checkpointing: false
 # whether to use an epinet instead of dropout-based uncertainty
 epinet: False
 
-# evaluate and save model every eval_every steps
+# evaluate and save model every eval_every training samples
 eval_every: 2_500
+
+# max train examples (if None, go till the train iterator gives up)
+max_train_examples: null
 
 # whether to use the pretraining split of the data
 pretrain: True
