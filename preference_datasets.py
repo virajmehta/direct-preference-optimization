@@ -46,7 +46,7 @@ def strip_html_tags(html_string):
 
 def get_se(split, silent=False, cache_dir: str = None) -> Dict[str, Dict[str, Union[List[Tuple[int, int]], List[str], str]]]:
     """Load the StackExchange dataset from Huggingface, and return a dict of prompts and responses. See get_hh for the format.
-    
+
        We strip the HTML tags from the responses (except for <code> tags), and we add necessary newlines.
     """
     print(f'Loading SE dataset ({split} split) from Huggingface...')
@@ -120,7 +120,7 @@ def get_shp(split: str, silent: bool = False, cache_dir: str = None) -> Dict[str
 
 def get_hh(split: str, silent: bool = False, cache_dir: str = None) -> Dict[str, Dict[str, Union[List[Tuple[int, int]], List[str], str]]]:
     """Load the Anthropic Helpful-Harmless dataset from Huggingface and convert it to the necessary format.
-    
+
        The dataset is converted to a dictionary with the following structure:
        {
            'prompt1': {
@@ -136,7 +136,7 @@ def get_hh(split: str, silent: bool = False, cache_dir: str = None) -> Dict[str,
        Prompts should be structured as follows:
          \n\nHuman: <prompt>\n\nAssistant:
        Multiple turns are allowed, but the prompt should always start with \n\nHuman: and end with \n\nAssistant:.
-       
+
        For this dataset, the sft_target is just the chosen response.
     """
     print(f'Loading HH dataset ({split} split) from Huggingface...')
@@ -179,7 +179,7 @@ def get_jeopardy(split: str, silent: bool = False, cache_dir: str = None) -> Dic
         answer = elt['answer']
         wrong_answer = elt['wrong_answer']
         prompt = f'{category}, for {value}: {question}'
-        responses = [answer, '[null]', wrong_answer]
+        responses = [answer, 'null', wrong_answer]
         pairs = [(0, 1), (0, 2), (1, 2)]
         return prompt, dict(responses=responses, pairs=pairs, sft_target=answer)
     all_data = {}
@@ -210,7 +210,7 @@ def get_dataset(name: str, split: str, silent: bool = False, cache_dir: str = No
 
 def get_collate_fn(tokenizer) -> Callable[[List[Dict]], Dict[str, Union[List, torch.Tensor]]]:
     """Returns a collate function for the given tokenizer.
-    
+
        The collate function takes a list of examples (dicts, where values are lists of
          ints [tokens] or strings [the original texts]) and returns a batch of examples,
          PyTorch tensors padded to the maximum length. Strings are passed through."""
@@ -244,11 +244,11 @@ def get_collate_fn(tokenizer) -> Callable[[List[Dict]], Dict[str, Union[List, to
 
 def tokenize_batch_element(prompt: str, chosen: str, rejected: str, truncation_mode: str, tokenizer, max_length: int, max_prompt_length: int) -> Dict:
     """Tokenize a single batch element.
-    
+
        At this stage, we don't convert to PyTorch tensors yet; we just handle the truncation
          in case the prompt + chosen or prompt + rejected responses is/are too long. First
          we truncate the prompt; if we're still too long, we truncate the chosen/rejected.
-       
+
        We also create the labels for the chosen/rejected responses, which are of length equal to
          the sum of the length of the prompt and the chosen/rejected response, with -100 for the
          prompt tokens.
@@ -307,111 +307,6 @@ def tokenize_batch_element(prompt: str, chosen: str, rejected: str, truncation_m
 
     return batch
 
-
-def get_batch_iterator(names: List[str],
-                       tokenizer,
-                       split: str = 'train',
-                       batch_size: int = 1,
-                       shuffle: bool = True,
-                       max_length: int = 512,
-                       max_prompt_length: int = 128,
-                       sft_mode: bool = False,
-                       n_epochs: Optional[int] = None,
-                       n_examples: Optional[int] = None,
-                       seed:int = 0,
-                       silent: bool = False,
-                       cache_dir: Optional[str] = None) -> Iterator[Dict]:
-    """Get an iterator over batches of data. Stops after n_epochs or n_examples, whichever comes first.
-
-    Args:
-        names: Names of datasets to use.
-        tokenizer: Tokenizer to use.
-        split: Which split to use.
-        batch_size: Batch size.
-        shuffle: Whether to shuffle the data after each epoch.
-        max_length: Maximum length of the combined prompt + response.
-        max_prompt_length: Maximum length of the prompt.
-        sft_mode: Whether to use SFT mode (i.e., return sft_target instead of chosen/rejected). In sft mode, we just return chosen_input_ids, but they contain the sft_target.
-        n_epochs: Number of epochs to run for. This or n_examples must be specified.
-        n_examples: Number of examples to run for. This or n_epochs must be specified.
-        seed: Random seed.
-        silent: Whether to silence the progress bar(s).
-        cache_dir: Directory to cache the datasets in.
-    """
-    assert n_epochs is not None or n_examples is not None, "Must specify either n_epochs or n_examples"
-
-    sft_fraction = 0.4 # don't mess with this too much, here in theory 1 would be all SFT and 0 would be all RLHF
-
-    if silent:
-        datasets.logging.disable_progress_bar()
-        datasets.logging.set_verbosity_error()
-
-    with TemporarilySeededRandom(seed):
-        permutation_seeds = iter(np.random.randint(0, 2**32, size=1000000))
-        flat_data = []
-        for name in names:
-            this_flat_data = []
-            truncation_mode = 'keep_end' if name == 'hh' else 'keep_start'
-            dataset = get_dataset(name, split, silent=silent, cache_dir=cache_dir)
-            for prompt, data in get_dataset(name, split, silent=silent, cache_dir=cache_dir).items():
-                this_flat_data.append((prompt, data['responses'], data['pairs'], data['sft_target'], truncation_mode))
-            if split == 'train':
-                split_idx = int(sft_fraction * len(this_flat_data))
-                if sft_mode:
-                    this_flat_data = this_flat_data[:split_idx]
-                else:
-                    this_flat_data = this_flat_data[split_idx:]
-            flat_data.extend(this_flat_data)
-
-    collate_fn = get_collate_fn(tokenizer)
-
-    epoch_idx = 0
-    example_idx = 0
-    done = False
-    while True:
-        if n_epochs is not None and epoch_idx >= n_epochs:
-            if not silent:
-                print(f'Finished generating {n_epochs} epochs on {split} split')
-            break
-        if shuffle:
-            with TemporarilySeededRandom(next(permutation_seeds)):
-                random.shuffle(flat_data)
-
-        batch = []
-        for prompt, responses, pairs, sft_target, truncation_mode in flat_data:
-            if done:
-                break
-            if sft_mode:
-                batch_element = tokenize_batch_element(prompt, sft_target, sft_target, truncation_mode, tokenizer, max_length, max_prompt_length)
-                batch_element = {k: v for k, v in batch_element.items() if 'rejected' not in k}
-                batch.append(batch_element)
-                example_idx += 1
-                if len(batch) == batch_size:
-                    yield collate_fn(batch)
-                    if n_examples is not None and example_idx >= n_examples:
-                        if not silent:
-                            print(f'Finished generating {n_examples} examples on {split} split')
-                        done = True
-
-                    batch = []
-            else:
-                for p in pairs:
-                    if done:
-                        break
-                    batch_element = tokenize_batch_element(prompt, responses[p[0]], responses[p[1]], truncation_mode, tokenizer, max_length, max_prompt_length)
-                    batch.append(batch_element)
-                    example_idx += 1
-                    if len(batch) == batch_size:
-                        yield collate_fn(batch)
-                        if n_examples is not None and example_idx >= n_examples:
-                            if not silent:
-                                print(f'FINISHED {n_examples} EXAMPLES on {split} split')
-                            done = True
-                        batch = []
-        if done:
-            break
-
-        epoch_idx += 1
 
 
 def strings_match_up_to_spaces(str_a: str, str_b: str) -> bool:

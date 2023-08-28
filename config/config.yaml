@@ -16,14 +16,17 @@ debug: false
 # the port to use for FSDP
 fsdp_port: 12355
 
+# should we do active data selection
+active: false
+
 # which dataset(s) to train on; can pass a list like datasets=[hh,shp]
 datasets:
 - hh
 
 # wandb configuration
 wandb:
-  enabled: False
-  entity: null
+  enabled: True
+  entity: "fusion-ml"
   project: "direct-preference-optimization"
 
 # to create the local run directory and cache models/datasets,
@@ -66,11 +69,16 @@ max_prompt_length: 256
 # the number of epochs to train for; if null, must specify n_examples
 n_epochs: 1
 
+# whether to use dropout during training
+dropout: True
+
 # the number of examples to train for; if null, must specify n_epochs
 n_examples: null
 
 # the number of examples to evaluate on (and sample from, if sample_during_eval is true)
 n_eval_examples: 256
+
+lambda_val: 0.1
 
 # the trainer class to use (e.g. BasicTrainer, FSDPTrainer, TensorParallelTrainer)
 trainer: BasicTrainer
@@ -84,11 +92,18 @@ warmup_steps: 150
 # whether or not to use activation/gradient checkpointing
 activation_checkpointing: false
 
+# whether to use an epinet instead of dropout-based uncertainty
+epinet: False
+
 # evaluate and save model every eval_every steps
-eval_every: 20_000
+eval_every: 2_500
 
 # prevent wandb from logging more than once per minimum_log_interval_secs
 minimum_log_interval_secs: 1.0
+
+lora_dropout: 0.05
+llm_dropout: 0.05
+have_llm_dropout: false
 
 defaults:
 - _self_

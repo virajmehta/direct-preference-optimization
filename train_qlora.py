@@ -4,12 +4,13 @@ torch.backends.cuda.matmul.allow_tf32 = True
 import torch.nn as nn
 import transformers
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
-from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed
+from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed, DropoutModel
 import os
 import hydra
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from omegaconf import OmegaConf, DictConfig
+from epinet import EpiNet, EpiNetConfig
 import trainers
 import wandb
 import json
@@ -95,7 +96,8 @@ def main(config: DictConfig):
         quantization_config=quant_config,
         **model_kwargs)
     print(policy)
-    disable_dropout(policy)
+    if not config.dropout:
+        disable_dropout(policy)
     policy.gradient_checkpointing_enable()
     policy = prepare_model_for_kbit_training(policy)
 
@@ -107,20 +109,31 @@ def main(config: DictConfig):
         r=8,
         lora_alpha=32,
         target_modules=target_modules,
-        lora_dropout=0.05,
+        lora_dropout=config.lora_dropout,
         bias="none",
         task_type="CAUSAL_LM"
     )
 
     policy = get_peft_model(policy, loraconfig)
+    if config.epinet:
+        epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
+        policy = EpiNet(epinet_config, policy)
+
+    if config.have_llm_dropout:
+        policy = DropoutModel(policy, config.llm_dropout)
 
     if config.loss.name == 'dpo':
         print('building reference model')
         reference_model_dtype = getattr(torch, config.model.reference_dtype)
         reference_model = transformers.AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
-            torch_dtype=reference_model_dtype, **model_kwargs)
+            torch_dtype=reference_model_dtype,
+            quantization_config=quant_config,
+            **model_kwargs)
+        print(reference_model)
         disable_dropout(reference_model)
+        reference_model = prepare_model_for_kbit_training(reference_model)
+        reference_model = get_peft_model(reference_model, loraconfig)
     else:
         reference_model = None
 
@@ -135,6 +148,7 @@ def main(config: DictConfig):
         print('loaded pre-trained weights')
 
     if 'FSDP' in config.trainer:
+        raise NotImplementedError("Lora + FSDP doesn't work yet")
         world_size = torch.cuda.device_count()
         print('starting', world_size, 'processes for FSDP training')
         mp.spawn(worker_main, nprocs=world_size, args=(world_size, config, policy, reference_model), join=True)
