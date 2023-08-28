@@ -10,6 +10,7 @@ import importlib.util
 import socket
 import os
 from typing import Dict, Union, Type, List
+from torch import nn
 
 
 def get_remote_file(remote_path, local_path=None):
@@ -169,3 +170,71 @@ class TemporarilySeededRandom:
         # Restore the random state
         random.setstate(self.stored_state)
         np.random.set_state(self.stored_np_state)
+
+class DropoutModel(nn.Module):
+    def __init__(self, model, dropout):
+        super(DropoutModel, self).__init__()
+
+        self.model = model
+        self.dropout = nn.Dropout(dropout).cuda()
+        self.linear = nn.Linear(32000, 32000).cuda()
+        self.config = model.config
+
+    def forward(self, input_ids=None, attention_mask=None, labels=None):
+        output = self.model(input_ids=input_ids, attention_mask=attention_mask)
+        dropout_output = self.dropout(output[0]).cuda()
+
+        logits = self.linear(dropout_output).cuda()
+
+        return DropoutModelOutput(logits)
+
+    def generate(self, inputs, attention_mask, max_length, do_sample, pad_token_id):
+        return self.model.generate(inputs=inputs, attention_mask=attention_mask, max_length=max_length, do_sample=do_sample, pad_token_id=pad_token_id)
+
+class DropoutModelOutput():
+    def __init__(self, logits):
+        self.logits = logits
+
+
+def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_samples):
+    """Predict with dropout, and return the mean and variance of the predictions."""
+    was_training = model.training
+    model.train()
+    with torch.no_grad():
+        outputs = [model(input_ids, attention_mask=attention_mask) for _ in range(num_samples)]
+        logits = [output.logits for output in outputs]
+        logps = [_get_batch_logps(logit, labels) for logit in logits]
+        predictions = torch.stack(logps)
+        mean = predictions.mean(dim=0)
+        variance = predictions.var(dim=0)
+    if not was_training:
+        model.eval()
+    return mean, variance
+
+
+def _get_batch_logps(logits: torch.FloatTensor, labels: torch.LongTensor, average_log_prob: bool = False) -> torch.FloatTensor:
+    """Compute the log probabilities of the given labels under the given logits.
+
+    Args:
+        logits: Logits of the model (unnormalized). Shape: (batch_size, sequence_length, vocab_size)
+        labels: Labels for which to compute the log probabilities. Label tokens with a value of -100 are ignored. Shape: (batch_size, sequence_length)
+        average_log_prob: If True, return the average log probability per (non-masked) token. Otherwise, return the sum of the log probabilities of the (non-masked) tokens.
+
+    Returns:
+        A tensor of shape (batch_size,) containing the average/sum log probabilities of the given labels under the given logits.
+    """
+    assert logits.shape[:-1] == labels.shape
+
+    labels = labels[:, 1:].clone()
+    logits = logits[:, :-1, :]
+    loss_mask = (labels != -100)
+
+    # dummy token; we'll ignore the losses on these tokens later
+    labels[labels == -100] = 0
+
+    per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
+
+    if average_log_prob:
+        return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
+    else:
+        return (per_token_logps * loss_mask).sum(-1)

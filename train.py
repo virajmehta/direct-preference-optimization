@@ -14,6 +14,7 @@ import json
 import socket
 from typing import Optional, Set
 import torch.multiprocessing
+from hydra.utils import to_absolute_path
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 
@@ -79,6 +80,7 @@ def main(config: DictConfig):
     policy_dtype = getattr(torch, config.model.policy_dtype)
     policy = transformers.AutoModelForCausalLM.from_pretrained(
         config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True, torch_dtype=policy_dtype, **model_kwargs)
+    # TODO: understand this
     disable_dropout(policy)
 
     if config.loss.name == 'dpo':
@@ -91,7 +93,8 @@ def main(config: DictConfig):
         reference_model = None
 
     if config.model.archive is not None:
-        state_dict = torch.load(config.model.archive, map_location='cpu')
+        archive_path = to_absolute_path(config.model.archive)
+        state_dict = torch.load(archive_path, map_location='cpu')
         step, metrics = state_dict['step_idx'], state_dict['metrics']
         print(f'loading pre-trained weights at step {step} from {config.model.archive} with metrics {json.dumps(metrics, indent=2)}')
         policy.load_state_dict(state_dict['state'])
