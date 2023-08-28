@@ -229,12 +229,13 @@ def get_active_iterator(names: List[str],
                     batch.append(batch_element)
                     example_idx += 1
                     if len(batch) == batch_size * selection_ratio:
-                        selected_batch = select_best_elements(batch=batch,
+                        collated_batch = collate_fn(batch)
+                        selected_batch = select_best_elements(batch=collated_batch,
                                                               num_to_select=batch_size,
                                                               policy=policy,
                                                               ref_policy=ref_policy,
                                                               n_samples=n_samples)
-                        yield collate_fn(batch)
+                        yield selected_batch
                         if n_examples is not None and example_idx >= n_examples:
                             if not silent:
                                 print(f'FINISHED {n_examples} EXAMPLES on {split} split')
@@ -254,6 +255,7 @@ def select_best_elements(batch: List[Dict],
                          beta: float = 2.):
     # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
     # don't use the fact that one is chosen or not
+    breakpoint()
     a1_input_ids = torch.tensor([elt['chosen_input_ids'] for elt in batch]).to(policy.device)
     a1_attention_mask = torch.tensor([elt['chosen_attention_mask'] for elt in batch]).to(policy.device)
     a1_labels = torch.tensor([elt['chosen_labels'] for elt in batch]).to(policy.device)
