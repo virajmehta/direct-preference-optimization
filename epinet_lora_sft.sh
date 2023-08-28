@@ -1,3 +1,3 @@
-python -u train_qlora.py model=llama7b datasets=[hh] loss=sft exp_name=hh_epillama7b_sft gradient_accumulation_steps=2 batch_size=32 eval_batch_size=8 sample_during_eval=True epinet=True wandb.enabled=False
-python -u train_qlora.py model=llama7b datasets=[shp] loss=sft exp_name=shp_epillama7b_sft gradient_accumulation_steps=2 batch_size=32 eval_batch_size=8 sample_during_eval=True epinet=True wandb.enabled=False
-python -u train_qlora.py model=llama7b datasets=[jeopardy] loss=sft exp_name=jeopardy_epillama7b_sft gradient_accumulation_steps=2 batch_size=32 eval_batch_size=8 sample_during_eval=True epinet=True wandb.enabled=False
+#python -u train_qlora.py model=llama7b datasets=[shp] loss=sft exp_name=shp_epillama7b_sft gradient_accumulation_steps=2 batch_size=32 eval_batch_size=8 sample_during_eval=True epinet=True wandb.enabled=False
+python -u train_qlora.py model=llama7b datasets=[jeopardy] loss=sft exp_name=jeopardy_epillama7b_sft_0.5 gradient_accumulation_steps=2 batch_size=32 eval_batch_size=8 sample_during_eval=True epinet=True wandb.enabled=False lambda_val=0.5
+python -u train_qlora.py model=llama7b datasets=[hh] loss=sft exp_name=hh_epillama7b_sft_0.5 gradient_accumulation_steps=2 batch_size=32 eval_batch_size=8 sample_during_eval=True epinet=True wandb.enabled=False lambda_val=0.5

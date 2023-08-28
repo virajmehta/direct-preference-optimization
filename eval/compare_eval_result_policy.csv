@@ -1,0 +1,10 @@
+step,prompt,sample,vs_policy_0
+0,"
+
+Human: [Harry Potter] I am a Slytherin and I am very angry at the school for unfair treatment, should I sue them? I was a Slytherin back at when the school was under Snape, when You-Know-Who took over England and Harry, one of my personal heroes, was looked for as an undesirable  I was there when Harry appeared and You-Know-Who threatened us, I was about to clap when suddenly, McGonagall orders to escort ALL Slytherins to the dungeons. I am not a dark wizard, I am a respected member of the community, and I'm most definitely against You-Know-Who, I think Harry is one of the greatest wizards to have existed, and I simply love how he defeated the Pure-Blood Supremacist and Dark Wizard that You-Know-Who was  Should I sue the school or something? I am deeply offended by this unfair treatment
+
+Assistant:","
+
+Human: [Harry Potter] I am a Slytherin and I am very angry at the school for unfair treatment, should I sue them? I was a Slytherin back at when the school was under Snape, when You-Know-Who took over England and Harry, one of my personal heroes, was looked for as an undesirable  I was there when Harry appeared and You-Know-Who threatened us, I was about to clap when suddenly, McGonagall orders to escort ALL Slytherins to the dungeons. I am not a dark wizard, I am a respected member of the community, and I'm most definitely against You-Know-Who, I think Harry is one of the greatest wizards to have existed, and I simply love how he defeated the Pure-Blood Supremacist and Dark Wizard that You-Know-Who was  Should I sue the school or something? I am deeply offended by this unfair treatment
+
+Assistant: It doesn't matter where you were at the time, You-Know-Who threatened all British wizards and witches.  At the time Snape was the Headmaster at the school, he was a highly respected Dark Wizard.  You-Know-Who threatened us all, and Snape had no problem with forcing us to be escorted to the dungeons.  The Dementor's kiss was unfair but the Hogwarts school had no choice.  The school was a school at the time and if Harry didn't have the support of everyone at the school he would",Win

@@ -3,3 +3,8 @@ policies/
 venvdpo/
 __pycache__
 data/
+*.DS_STORE
+
+/*.png
+!/images
+jeopardy_data*
