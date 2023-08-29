@@ -93,13 +93,13 @@ def main(config: DictConfig):
     policy = transformers.AutoModelForCausalLM.from_pretrained(
         config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
         torch_dtype=policy_dtype,
-        quantization_config=quant_config,
+        load_in_8bit=True,
+        # quantization_config=quant_config,
         **model_kwargs)
     print(policy)
     if not config.dropout:
         disable_dropout(policy)
     policy.gradient_checkpointing_enable()
-    policy = prepare_model_for_kbit_training(policy)
 
     if 'pythia' in config.model.name_or_path:
         target_modules = ['query_key_value']
@@ -121,6 +121,8 @@ def main(config: DictConfig):
 
     if config.have_llm_dropout:
         policy = DropoutModel(policy, config.llm_dropout)
+    print(policy)
+    policy = prepare_model_for_kbit_training(policy)
 
     if config.loss.name == 'dpo':
         print('building reference model')
@@ -128,7 +130,8 @@ def main(config: DictConfig):
         reference_model = transformers.AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
             torch_dtype=reference_model_dtype,
-            quantization_config=quant_config,
+            load_in_8bit=True,
+            # quantization_config=quant_config,
             **model_kwargs)
         print(reference_model)
         disable_dropout(reference_model)

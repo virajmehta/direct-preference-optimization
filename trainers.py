@@ -264,7 +264,7 @@ class BasicTrainer(object):
                 self.reference_text_table = wandb.Table(columns=cols)
 
 
-        print(f"{next(self.policy.parameters()).dtype=}")
+        print(f"DTYPE: {next(self.policy.parameters()).dtype=}")
         for batch in self.train_iterator:
             #### BEGIN EVALUATION ####
             if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):

@@ -183,9 +183,9 @@ class DropoutModel(nn.Module):
 
     def forward(self, input_ids=None, attention_mask=None, labels=None):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        dropout_output = self.dropout(output[0]).cuda()
+        dropout_output = self.dropout(output[0])
 
-        logits = self.linear(dropout_output).cuda()
+        logits = self.linear(dropout_output)
 
         return DropoutModelOutput(logits)
 
