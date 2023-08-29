@@ -22,6 +22,8 @@ import pickle
 OmegaConf.register_new_resolver("get_local_run_dir",
                                 lambda exp_name, local_dirs: get_local_run_dir(exp_name, local_dirs))
 
+torch.set_default_dtype(torch.float16)
+
 
 def worker_main(rank: int, world_size: int, config: DictConfig, policy: nn.Module,
                 reference_model: Optional[nn.Module] = None):
@@ -90,6 +92,7 @@ def main(config: DictConfig):
     print('building policy')
     model_kwargs = {'device_map': 'balanced'} if config.trainer == 'BasicTrainer' else {}
     policy_dtype = getattr(torch, config.model.policy_dtype)
+    print('policy_dtype', policy_dtype)
     policy = transformers.AutoModelForCausalLM.from_pretrained(
         config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
         torch_dtype=policy_dtype,
@@ -122,7 +125,7 @@ def main(config: DictConfig):
     if config.have_llm_dropout:
         policy = DropoutModel(policy, config.llm_dropout)
     print(policy)
-    policy = prepare_model_for_kbit_training(policy)
+    # policy = prepare_model_for_kbit_training(policy)
 
     if config.loss.name == 'dpo':
         print('building reference model')

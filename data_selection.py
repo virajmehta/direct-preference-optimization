@@ -256,6 +256,7 @@ def select_best_elements(batch: List[Dict],
                          beta: float = 2.):
     # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
     # don't use the fact that one is chosen or not
+    print('selecting best elements')
     start_time = time.time()
     device = next(policy.parameters()).device
     a1_input_ids = batch['chosen_input_ids'].to(device)
