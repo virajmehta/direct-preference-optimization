@@ -1,6 +1,7 @@
 import torch
 import datasets
 import random
+import time
 import numpy as np
 from typing import List, Optional, Iterator, Dict
 from utils import TemporarilySeededRandom, predict_logits_with_dropout
@@ -255,21 +256,45 @@ def select_best_elements(batch: List[Dict],
                          beta: float = 2.):
     # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
     # don't use the fact that one is chosen or not
-    breakpoint()
-    a1_input_ids = torch.tensor([elt['chosen_input_ids'] for elt in batch]).to(policy.device)
-    a1_attention_mask = torch.tensor([elt['chosen_attention_mask'] for elt in batch]).to(policy.device)
-    a1_labels = torch.tensor([elt['chosen_labels'] for elt in batch]).to(policy.device)
-    a1_input_ids = torch.tensor([elt['rejected_input_ids'] for elt in batch]).to(policy.device)
-    a1_attention_mask = torch.tensor([elt['rejected_attention_mask'] for elt in batch]).to(policy.device)
-    a1_labels = torch.tensor([elt['rejected_labels'] for elt in batch]).to(policy.device)
-    a1_mean, a1_variance = predict_logits_with_dropout(policy, a1_input_ids, a1_attention_mask, a1_labels, n_samples)
-    a2_mean, a2_variance = predict_logits_with_dropout(policy, a2_input_ids, a2_attention_mask, a2_labels, n_samples)
-    ref_logits_a1, _ = predict_logits_with_dropout(ref_policy, a1_input_ids, a1_attention_mask, a1_labels, 1)
-    ref_logits_a2, _ = predict_logits_with_dropout(ref_policy, a2_input_ids, a2_attention_mask, a2_labels, 1)
+    start_time = time.time()
+    device = next(policy.parameters()).device
+    a1_input_ids = batch['chosen_input_ids'].to(device)
+    a1_attention_mask = batch['chosen_attention_mask'].to(device)
+    a1_labels = batch['chosen_labels'].to(device)
+    a2_input_ids = batch['rejected_input_ids'].to(device)
+    a2_attention_mask = batch['rejected_attention_mask'].to(device)
+    a2_labels = batch['rejected_labels'].to(device)
+    ga1_mean, ga1_variance = predict_logits_with_dropout(policy, a1_input_ids, a1_attention_mask, a1_labels, n_samples)
+    a1_mean = ga1_mean.to('cpu')
+    a1_variance = ga1_variance.to('cpu')
+    del ga1_mean
+    del ga1_variance
+    ga2_mean, ga2_variance = predict_logits_with_dropout(policy, a2_input_ids, a2_attention_mask, a2_labels, n_samples)
+    a2_mean = ga2_mean.to('cpu')
+    a2_variance = ga2_variance.to('cpu')
+    del ga2_mean
+    del ga2_variance
+    gref_logits_a1, todel1 = predict_logits_with_dropout(ref_policy, a1_input_ids, a1_attention_mask, a1_labels, 1)
+    ref_logits_a1 = gref_logits_a1.to('cpu')
+    del gref_logits_a1
+    del todel1
+    gref_logits_a2, todel2 = predict_logits_with_dropout(ref_policy, a2_input_ids, a2_attention_mask, a2_labels, 1)
+    ref_logits_a2 = gref_logits_a2.to('cpu')
+    del gref_logits_a2
+    del todel2
     a1_std = torch.sqrt(a1_variance)
     a2_std = torch.sqrt(a2_variance)
     upper_bounds = torch.max(a1_mean + beta * a1_std - ref_logits_a1, a2_mean + beta * a2_std - ref_logits_a2)
     lower_bounds = torch.max(a1_mean - beta * a1_std - ref_logits_a1, a2_mean - beta * a2_std - ref_logits_a2)
     uncertainties = upper_bounds - lower_bounds
     values, indices = torch.topk(uncertainties, num_to_select, sorted=False)
-    return batch[indices]
+    out_batch = {}
+    for k, v in batch.items():
+        if isinstance(v, torch.Tensor):
+            out_batch[k] = v[indices, ...]
+        else:
+            out_batch[k] = [v[i] for i in indices.tolist()]
+    end_time = time.time()
+    torch.cuda.empty_cache()
+    print(f"Data selection elapsed: {end_time - start_time:.2f}s")
+    return out_batch

@@ -1,4 +1,5 @@
 import os
+import math
 import getpass
 from datetime import datetime
 import torch
@@ -196,6 +197,7 @@ class DropoutModelOutput():
         self.logits = logits
 
 
+'''
 def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_samples):
     """Predict with dropout, and return the mean and variance of the predictions."""
     was_training = model.training
@@ -210,6 +212,7 @@ def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_sa
     if not was_training:
         model.eval()
     return mean, variance
+'''
 
 
 def _get_batch_logps(logits: torch.FloatTensor, labels: torch.LongTensor, average_log_prob: bool = False) -> torch.FloatTensor:
@@ -238,3 +241,38 @@ def _get_batch_logps(logits: torch.FloatTensor, labels: torch.LongTensor, averag
         return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
     else:
         return (per_token_logps * loss_mask).sum(-1)
+
+def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_samples, minibatch_size=8):
+    """Predict with dropout, and return the mean and variance of the predictions."""
+    was_training = model.training
+    model.train()
+
+    n = input_ids.size(0)
+    batch_count = math.ceil(n / minibatch_size)
+
+    logps_list = []
+    with torch.no_grad():
+        for batch_idx in range(batch_count):
+            start_idx = batch_idx * minibatch_size
+            end_idx = min((batch_idx + 1) * minibatch_size, n)
+            input_ids_batch = input_ids[start_idx:end_idx]
+            attention_mask_batch = attention_mask[start_idx:end_idx]
+            labels_batch = labels[start_idx:end_idx]
+
+            outputs = [model(input_ids_batch, attention_mask=attention_mask_batch) for _ in range(num_samples)]
+            logits = [output.logits for output in outputs]
+            logps = [_get_batch_logps(logit, labels_batch) for logit in logits]
+
+            logps_list.append(torch.stack(logps))
+
+    predictions = torch.cat(logps_list, dim=1)
+    mean = predictions.mean(dim=0)
+    variance = predictions.var(dim=0)
+    del input_ids
+    del attention_mask
+    del labels
+
+    if not was_training:
+        model.eval()
+
+    return mean, variance
