@@ -264,12 +264,14 @@ class BasicTrainer(object):
                 self.reference_text_table = wandb.Table(columns=cols)
 
 
+        print(f"{next(self.policy.parameters()).dtype=}")
         for batch in self.train_iterator:
             #### BEGIN EVALUATION ####
             if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):
                 self.evaluate()
             #### END EVALUATION ####
 
+            torch.cuda.empty_cache()
             #### BEGIN TRAINING ####
             self.policy.train()
 
@@ -321,6 +323,7 @@ class BasicTrainer(object):
         rank0_print(f'Running evaluation after {self.example_counter} train examples')
         print('Beginning evaluation')
         cur_gpu_mem = torch.cuda.memory_allocated()
+        torch.cuda.empty_cache()
         print(f'currently allocated: {cur_gpu_mem}')
         torch.cuda.reset_peak_memory_stats()
         self.policy.eval()
