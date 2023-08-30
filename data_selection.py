@@ -265,21 +265,21 @@ def select_best_elements(batch: List[Dict],
     a2_attention_mask = batch['rejected_attention_mask'].to(device)
     a2_labels = batch['rejected_labels'].to(device)
     ga1_mean, ga1_variance = predict_logits_with_dropout(policy, a1_input_ids, a1_attention_mask, a1_labels, n_samples)
-    a1_mean = ga1_mean.to('cpu')
-    a1_variance = ga1_variance.to('cpu')
+    a1_mean = ga1_mean.to('cpu').float()
+    a1_variance = ga1_variance.to('cpu').float()
     del ga1_mean
     del ga1_variance
     ga2_mean, ga2_variance = predict_logits_with_dropout(policy, a2_input_ids, a2_attention_mask, a2_labels, n_samples)
-    a2_mean = ga2_mean.to('cpu')
-    a2_variance = ga2_variance.to('cpu')
+    a2_mean = ga2_mean.to('cpu').float()
+    a2_variance = ga2_variance.to('cpu').float()
     del ga2_mean
     del ga2_variance
     gref_logits_a1, todel1 = predict_logits_with_dropout(ref_policy, a1_input_ids, a1_attention_mask, a1_labels, 1)
-    ref_logits_a1 = gref_logits_a1.to('cpu')
+    ref_logits_a1 = gref_logits_a1.to('cpu').float()
     del gref_logits_a1
     del todel1
     gref_logits_a2, todel2 = predict_logits_with_dropout(ref_policy, a2_input_ids, a2_attention_mask, a2_labels, 1)
-    ref_logits_a2 = gref_logits_a2.to('cpu')
+    ref_logits_a2 = gref_logits_a2.to('cpu').float()
     del gref_logits_a2
     del todel2
     a1_std = torch.sqrt(a1_variance)
@@ -296,5 +296,11 @@ def select_best_elements(batch: List[Dict],
             out_batch[k] = [v[i] for i in indices.tolist()]
     end_time = time.time()
     torch.cuda.empty_cache()
+    del a1_input_ids
+    del a1_attention_mask
+    del a1_labels
+    del a2_input_ids
+    del a2_attention_mask
+    del a2_labels
     print(f"Data selection elapsed: {end_time - start_time:.2f}s")
     return out_batch

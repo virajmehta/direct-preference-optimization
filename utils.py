@@ -178,7 +178,7 @@ class DropoutModel(nn.Module):
 
         self.model = model
         self.dropout = nn.Dropout(dropout).cuda()
-        self.linear = nn.Linear(32000, 32000).cuda()
+        self.linear = nn.Linear(32000, 32000).cuda().half()
         self.config = model.config
 
     def forward(self, input_ids=None, attention_mask=None, labels=None):

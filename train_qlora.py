@@ -3,7 +3,9 @@ import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 import torch.nn as nn
 import transformers
-from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
+from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft.tuners.lora import LoraLayer
+from transformers import BitsAndBytesConfig
 from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed, DropoutModel
 import os
 import hydra
@@ -21,6 +23,8 @@ import pickle
 
 OmegaConf.register_new_resolver("get_local_run_dir",
                                 lambda exp_name, local_dirs: get_local_run_dir(exp_name, local_dirs))
+
+torch.set_default_dtype(torch.float16)
 
 
 def worker_main(rank: int, world_size: int, config: DictConfig, policy: nn.Module,
@@ -80,26 +84,27 @@ def main(config: DictConfig):
 
     os.environ['XDG_CACHE_HOME'] = get_local_dir(config.local_dirs)
 
-    quant_config = transformers.BitsAndBytesConfig(
+    print('building policy')
+    model_kwargs = {'device_map': 'auto'}
+    policy_dtype = getattr(torch, config.model.policy_dtype)
+    print('policy_dtype', policy_dtype)
+    bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype=torch.bfloat16
     )
-
-    print('building policy')
-    model_kwargs = {'device_map': 'balanced'} if config.trainer == 'BasicTrainer' else {}
-    policy_dtype = getattr(torch, config.model.policy_dtype)
     policy = transformers.AutoModelForCausalLM.from_pretrained(
         config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
-        torch_dtype=policy_dtype,
-        load_in_8bit=True,
-        # quantization_config=quant_config,
+        # torch_dtype=policy_dtype,
+        quantization_config=bnb_config,
         **model_kwargs)
+    # policy.config.dtype = torch.bfloat16
     print(policy)
-    if not config.dropout:
-        disable_dropout(policy)
+    # if not config.dropout:
+    #     disable_dropout(policy)
     policy.gradient_checkpointing_enable()
+    policy = prepare_model_for_kbit_training(policy)
 
     if 'pythia' in config.model.name_or_path:
         target_modules = ['query_key_value']
@@ -115,6 +120,19 @@ def main(config: DictConfig):
     )
 
     policy = get_peft_model(policy, loraconfig)
+    for name, module in policy.named_modules():
+        if isinstance(module, LoraLayer):
+            module = module.to(torch.float16)
+        if 'norm' in name:
+            module = module.to(torch.float16)
+        if hasattr(module, 'weight'):
+            if module.weight.dtype == torch.float32:
+                module = module.to(torch.float16)
+        if 'lm_head' in name or 'embed_tokens' in name:
+            if hasattr(module, 'weight'):
+                if module.weight.dtype == torch.float32:
+                    module = module.to(torch.float16)
+        # print(name, module.dtype)
     if config.epinet:
         epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
         policy = EpiNet(epinet_config, policy)
@@ -122,21 +140,38 @@ def main(config: DictConfig):
     if config.have_llm_dropout:
         policy = DropoutModel(policy, config.llm_dropout)
     print(policy)
-    policy = prepare_model_for_kbit_training(policy)
+    # Print dtypes of all layers in policy
+    for name, module in policy.named_modules():
+        if hasattr(module, 'weight'):
+            print(name, module.weight.dtype)
+        elif hasattr(module, 'dtype'):
+            print(name, module.dtype)
+        else:
+            print(name, 'no dtype')
+
 
     if config.loss.name == 'dpo':
         print('building reference model')
         reference_model_dtype = getattr(torch, config.model.reference_dtype)
         reference_model = transformers.AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
-            torch_dtype=reference_model_dtype,
-            load_in_8bit=True,
-            # quantization_config=quant_config,
+            quantization_config=bnb_config,
             **model_kwargs)
-        print(reference_model)
-        disable_dropout(reference_model)
+        reference_model.gradient_checkpointing_enable()
         reference_model = prepare_model_for_kbit_training(reference_model)
         reference_model = get_peft_model(reference_model, loraconfig)
+        for name, module in reference_model.named_modules():
+            if isinstance(module, LoraLayer):
+                module = module.to(torch.float16)
+            if 'norm' in name:
+                module = module.to(torch.float16)
+            if hasattr(module, 'weight'):
+                if module.weight.dtype == torch.float32:
+                    module = module.to(torch.float16)
+            if 'lm_head' in name or 'embed_tokens' in name:
+                if hasattr(module, 'weight'):
+                    if module.weight.dtype == torch.float32:
+                        module = module.to(torch.float16)
         if config.have_llm_dropout:
             reference_model = DropoutModel(reference_model, 0.)
     else:
