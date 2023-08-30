@@ -140,6 +140,8 @@ def get_active_iterator(names: List[str],
                         policy: Optional[torch.nn.Module] = None,
                         ref_policy: Optional[torch.nn.Module] = None,
                         n_samples: int = 5,
+                        selection_strategy:str = 'ae',  # 'ae' or 'us'
+                        beta: float = 2.,
                         **kwargs) -> Iterator[Dict]:
     """Get an iterator over batches of data. Stops after n_epochs or n_examples, whichever comes first.
 
@@ -158,6 +160,10 @@ def get_active_iterator(names: List[str],
         seed: Random seed.
         silent: Whether to silence the progress bar(s).
         cache_dir: Directory to cache the datasets in.
+        policy: pointer to current model
+        ref_policy: pointer to reference model
+        n_samples: number of samples to draw from the policy for uncertainty estimation
+        selection_strategy: 'ae' or 'us' for active exploration or uncertainty sampling
         kwargs: this function should be "nice" and ignore other kwargs so that it can have a unified interface with our data selection. We don't use them here.
     """
     assert not sft_mode, "Active iterator should never be used for SFT" # TODO: maybe we might want it for a comparison later, but this is the assumption today
@@ -231,11 +237,21 @@ def get_active_iterator(names: List[str],
                     example_idx += 1
                     if len(batch) == batch_size * selection_ratio:
                         collated_batch = collate_fn(batch)
-                        selected_batch = select_best_elements(batch=collated_batch,
-                                                              num_to_select=batch_size,
-                                                              policy=policy,
-                                                              ref_policy=ref_policy,
-                                                              n_samples=n_samples)
+                        if selection_strategy == 'ae':
+                            selected_batch = select_best_elements(batch=collated_batch,
+                                                                  num_to_select=batch_size,
+                                                                  policy=policy,
+                                                                  ref_policy=ref_policy,
+                                                                  n_samples=n_samples,
+                                                                  beta=beta)
+                        elif selection_strategy == 'us':
+                            selected_batch = select_us_elements(batch=collated_batch,
+                                                                num_to_select=batch_size,
+                                                                policy=policy,
+                                                                ref_policy=ref_policy,
+                                                                n_samples=n_samples)
+                        else:
+                            raise NotImplementedError(f'Selection strategy {selection_strategy} not implemented')
                         yield selected_batch
                         if n_examples is not None and example_idx >= n_examples:
                             if not silent:
@@ -287,6 +303,60 @@ def select_best_elements(batch: List[Dict],
     upper_bounds = torch.max(a1_mean + beta * a1_std - ref_logits_a1, a2_mean + beta * a2_std - ref_logits_a2)
     lower_bounds = torch.max(a1_mean - beta * a1_std - ref_logits_a1, a2_mean - beta * a2_std - ref_logits_a2)
     uncertainties = upper_bounds - lower_bounds
+    values, indices = torch.topk(uncertainties, num_to_select, sorted=False)
+    out_batch = {}
+    for k, v in batch.items():
+        if isinstance(v, torch.Tensor):
+            out_batch[k] = v[indices, ...]
+        else:
+            out_batch[k] = [v[i] for i in indices.tolist()]
+    end_time = time.time()
+    torch.cuda.empty_cache()
+    del a1_input_ids
+    del a1_attention_mask
+    del a1_labels
+    del a2_input_ids
+    del a2_attention_mask
+    del a2_labels
+    print(f"Data selection elapsed: {end_time - start_time:.2f}s")
+    return out_batch
+
+
+def select_us_elements(batch: List[Dict],
+                       num_to_select: int,
+                       policy: torch.nn.Module,
+                       ref_policy: torch.nn.Module,
+                       n_samples: int,
+                       ):
+    # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
+    # don't use the fact that one is chosen or not
+    start_time = time.time()
+    device = next(policy.parameters()).device
+    a1_input_ids = batch['chosen_input_ids'].to(device)
+    a1_attention_mask = batch['chosen_attention_mask'].to(device)
+    a1_labels = batch['chosen_labels'].to(device)
+    a2_input_ids = batch['rejected_input_ids'].to(device)
+    a2_attention_mask = batch['rejected_attention_mask'].to(device)
+    a2_labels = batch['rejected_labels'].to(device)
+    ga1_mean, ga1_variance = predict_logits_with_dropout(policy, a1_input_ids, a1_attention_mask, a1_labels, n_samples)
+    a1_mean = ga1_mean.to('cpu').float()
+    a1_variance = ga1_variance.to('cpu').float()
+    del ga1_mean
+    del ga1_variance
+    ga2_mean, ga2_variance = predict_logits_with_dropout(policy, a2_input_ids, a2_attention_mask, a2_labels, n_samples)
+    a2_mean = ga2_mean.to('cpu').float()
+    a2_variance = ga2_variance.to('cpu').float()
+    del ga2_mean
+    del ga2_variance
+    gref_logits_a1, todel1 = predict_logits_with_dropout(ref_policy, a1_input_ids, a1_attention_mask, a1_labels, 1)
+    ref_logits_a1 = gref_logits_a1.to('cpu').float()
+    del gref_logits_a1
+    del todel1
+    gref_logits_a2, todel2 = predict_logits_with_dropout(ref_policy, a2_input_ids, a2_attention_mask, a2_labels, 1)
+    ref_logits_a2 = gref_logits_a2.to('cpu').float()
+    del gref_logits_a2
+    del todel2
+    uncertainties = (a1_variance + a2_variance) / 2
     values, indices = torch.topk(uncertainties, num_to_select, sorted=False)
     out_batch = {}
     for k, v in batch.items():
