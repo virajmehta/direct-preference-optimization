@@ -19,7 +19,12 @@ from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 import tensor_parallel as tp
 import bitsandbytes as bnb
 
-from data_selection import get_shuffle_iterator, get_active_iterator
+from data_selection import (
+        get_shuffle_iterator,
+        get_active_iterator,
+        compute_us_uncertainty,
+        compute_ae_uncertainty
+        )
 from utils import (
     slice_and_move_batch_for_device,
     formatted_dict,
@@ -147,8 +152,16 @@ class BasicTrainer(object):
 
         # assert config.n_epochs is None, "For our method, we will always specify the number of examples"
         if config.active:
-            self.train_iterator = get_active_iterator(**data_iterator_kwargs, split='train', n_examples=config.n_examples, batch_size=config.batch_size,
-                                                      silent=rank != 0, cache_dir=get_local_dir(config.local_dirs), selection_strategy=config.selection_strategy)
+            self.train_iterator = get_active_iterator(**data_iterator_kwargs,
+                                                      split='train',
+                                                      n_examples=config.n_examples,
+                                                      batch_size=config.batch_size,
+                                                      silent=rank != 0,
+                                                      cache_dir=get_local_dir(config.local_dirs),
+                                                      selection_strategy=config.selection_strategy,
+                                                      beta=config.beta,
+                                                      n_samples=config.n_unc_samples)
+            self.uncertainty_fn = compute_ae_uncertainty if config.selection_strategy is 'ae' else compute_us_uncertainty
         else:
             self.train_iterator = get_shuffle_iterator(**data_iterator_kwargs, split='train', n_epochs=config.n_epochs, n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
         rank0_print(f'Loaded train data iterator')
@@ -258,6 +271,8 @@ class BasicTrainer(object):
             cols.append('correct_answer')
             self.null_token = self.tokenizer.convert_tokens_to_ids('NULL')
         if self.config.sample_during_eval:
+            if self.config.active:
+                cols.append('uncertainty')
             self.policy_text_table = wandb.Table(columns=cols)
             if self.config.loss.name == 'dpo':
                 cols = ['step', 'prompt', 'sample']
@@ -352,6 +367,11 @@ class BasicTrainer(object):
                 if self.is_jeopardy:
                     with torch.no_grad():
                         outputs = self.policy(local_eval_batch['prompt_input_ids'], attention_mask=local_eval_batch['prompt_attention_mask'])
+                        uncertainties = uncertainty_fn(batch=batch,
+                                                       policy=self.policy,
+                                                       ref_policy=ref_policy,
+                                                       n_samples=self.config.n_unc_samples,
+                                                       beta = self.config.beta)
                         logits = outputs.logits
                         probs = F.softmax(logits, dim=-1)
                         null_probs = probs[:, -1, self.null_token]
@@ -361,11 +381,14 @@ class BasicTrainer(object):
                 all_policy_samples.extend(policy_samples)
                 all_reference_samples.extend(reference_samples)
 
+
                 for i, (prompt, sample) in enumerate(zip(eval_batch['prompt'], policy_samples)):
                     inputs = [self.example_counter, prompt, sample]
                     if self.is_jeopardy:
                         inputs.append(null_probs[i].item())
                         inputs.append(eval_batch['chosen_response_only'][i])
+                    if self.config.active:
+                        inputs.append(uncertainties[i].item())
                     self.policy_text_table.add_data(*inputs)
                 if self.is_jeopardy:
                     del null_probs

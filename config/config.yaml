@@ -24,6 +24,12 @@ active: false
 # "ae" or "us"
 selection_strategy = "ae"
 
+# beta for ae selection
+beta: 2.
+
+# n_unc_samples is how many samples of dropout / epinet to use to estimate variances
+n_unc_samples: 5
+
 # which dataset(s) to train on; can pass a list like datasets=[hh,shp]
 datasets:
 - hh

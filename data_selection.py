@@ -264,15 +264,9 @@ def get_active_iterator(names: List[str],
         epoch_idx += 1
 
 
-def select_best_elements(batch: List[Dict],
-                         num_to_select: int,
-                         policy: torch.nn.Module,
-                         ref_policy: torch.nn.Module,
-                         n_samples: int,
-                         beta: float = 2.):
-    # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
-    # don't use the fact that one is chosen or not
-    start_time = time.time()
+def compute_means_variances(batch: List[Dict],
+                            policy: torch.nn.Module,
+                            n_samples: int):
     device = next(policy.parameters()).device
     a1_input_ids = batch['chosen_input_ids'].to(device)
     a1_attention_mask = batch['chosen_attention_mask'].to(device)
@@ -290,6 +284,21 @@ def select_best_elements(batch: List[Dict],
     a2_variance = ga2_variance.to('cpu').float()
     del ga2_mean
     del ga2_variance
+    del a1_input_ids
+    del a1_attention_mask
+    del a1_labels
+    del a2_input_ids
+    del a2_attention_mask
+    del a2_labels
+    return a1_mean, a1_variance, a2_mean, a2_variance
+
+
+def compute_ae_uncertainty(batch: List[Dict],
+                           policy: torch.nn.Module,
+                           ref_policy: torch.nn.Module,
+                           n_samples: int,
+                           beta: float):
+    a1_mean, a1_variance, a2_mean, a2_variance = compute_means_variances(batch, policy, n_samples)
     gref_logits_a1, todel1 = predict_logits_with_dropout(ref_policy, a1_input_ids, a1_attention_mask, a1_labels, 1)
     ref_logits_a1 = gref_logits_a1.to('cpu').float()
     del gref_logits_a1
@@ -303,6 +312,28 @@ def select_best_elements(batch: List[Dict],
     upper_bounds = torch.max(a1_mean + beta * a1_std - ref_logits_a1, a2_mean + beta * a2_std - ref_logits_a2)
     lower_bounds = torch.max(a1_mean - beta * a1_std - ref_logits_a1, a2_mean - beta * a2_std - ref_logits_a2)
     uncertainties = upper_bounds - lower_bounds
+    return uncertainties
+
+
+def compute_us_uncertainty(batch: List[Dict],
+                           policy: torch.nn.Module,
+                           n_samples: int,
+                           **kwargs):
+    a1_mean, a1_variance, a2_mean, a2_variance = compute_means_variances(batch, policy, n_samples)
+    uncertainties = (a1_variance + a2_variance) / 2
+    return uncertainties
+
+
+def select_best_elements(batch: List[Dict],
+                         num_to_select: int,
+                         policy: torch.nn.Module,
+                         ref_policy: torch.nn.Module,
+                         n_samples: int,
+                         beta: float = 2.):
+    # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
+    # don't use the fact that one is chosen or not
+    start_time = time.time()
+    uncertainties = compute_ae_uncertainty(batch, policy, ref_policy, n_samples, beta)
     values, indices = torch.topk(uncertainties, num_to_select, sorted=False)
     out_batch = {}
     for k, v in batch.items():
@@ -312,12 +343,6 @@ def select_best_elements(batch: List[Dict],
             out_batch[k] = [v[i] for i in indices.tolist()]
     end_time = time.time()
     torch.cuda.empty_cache()
-    del a1_input_ids
-    del a1_attention_mask
-    del a1_labels
-    del a2_input_ids
-    del a2_attention_mask
-    del a2_labels
     print(f"Data selection elapsed: {end_time - start_time:.2f}s")
     return out_batch
 
@@ -331,32 +356,7 @@ def select_us_elements(batch: List[Dict],
     # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
     # don't use the fact that one is chosen or not
     start_time = time.time()
-    device = next(policy.parameters()).device
-    a1_input_ids = batch['chosen_input_ids'].to(device)
-    a1_attention_mask = batch['chosen_attention_mask'].to(device)
-    a1_labels = batch['chosen_labels'].to(device)
-    a2_input_ids = batch['rejected_input_ids'].to(device)
-    a2_attention_mask = batch['rejected_attention_mask'].to(device)
-    a2_labels = batch['rejected_labels'].to(device)
-    ga1_mean, ga1_variance = predict_logits_with_dropout(policy, a1_input_ids, a1_attention_mask, a1_labels, n_samples)
-    a1_mean = ga1_mean.to('cpu').float()
-    a1_variance = ga1_variance.to('cpu').float()
-    del ga1_mean
-    del ga1_variance
-    ga2_mean, ga2_variance = predict_logits_with_dropout(policy, a2_input_ids, a2_attention_mask, a2_labels, n_samples)
-    a2_mean = ga2_mean.to('cpu').float()
-    a2_variance = ga2_variance.to('cpu').float()
-    del ga2_mean
-    del ga2_variance
-    gref_logits_a1, todel1 = predict_logits_with_dropout(ref_policy, a1_input_ids, a1_attention_mask, a1_labels, 1)
-    ref_logits_a1 = gref_logits_a1.to('cpu').float()
-    del gref_logits_a1
-    del todel1
-    gref_logits_a2, todel2 = predict_logits_with_dropout(ref_policy, a2_input_ids, a2_attention_mask, a2_labels, 1)
-    ref_logits_a2 = gref_logits_a2.to('cpu').float()
-    del gref_logits_a2
-    del todel2
-    uncertainties = (a1_variance + a2_variance) / 2
+    uncertainties = compute_us_uncertainty(batch, policy, n_samples)
     values, indices = torch.topk(uncertainties, num_to_select, sorted=False)
     out_batch = {}
     for k, v in batch.items():
@@ -366,11 +366,5 @@ def select_us_elements(batch: List[Dict],
             out_batch[k] = [v[i] for i in indices.tolist()]
     end_time = time.time()
     torch.cuda.empty_cache()
-    del a1_input_ids
-    del a1_attention_mask
-    del a1_labels
-    del a2_input_ids
-    del a2_attention_mask
-    del a2_labels
     print(f"Data selection elapsed: {end_time - start_time:.2f}s")
     return out_batch
