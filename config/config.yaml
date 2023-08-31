@@ -19,6 +19,11 @@ fsdp_port: 12355
 # should we do active data selection
 active: false
 
+# selection strategy for active selection
+# only matters if active is true
+# "ae" or "us"
+selection_strategy = "ae"
+
 # which dataset(s) to train on; can pass a list like datasets=[hh,shp]
 datasets:
 - hh
