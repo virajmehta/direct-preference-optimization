@@ -547,4 +547,3 @@ class TensorParallelTrainer(BasicTrainer):
 
         self.write_state_dict(self.example_counter, policy_state_dict, metrics, 'policy.pt', output_dir)
         del policy_state_dict
-

@@ -141,13 +141,13 @@ def main(config: DictConfig):
         policy = DropoutModel(policy, config.llm_dropout)
     print(policy)
     # Print dtypes of all layers in policy
-    for name, module in policy.named_modules():
-        if hasattr(module, 'weight'):
-            print(name, module.weight.dtype)
-        elif hasattr(module, 'dtype'):
-            print(name, module.dtype)
-        else:
-            print(name, 'no dtype')
+    # for name, module in policy.named_modules():
+    #     if hasattr(module, 'weight'):
+    #         print(name, module.weight.dtype)
+    #     elif hasattr(module, 'dtype'):
+    #         print(name, module.dtype)
+    #     else:
+    #         print(name, 'no dtype')
 
 
     if config.loss.name == 'dpo':
