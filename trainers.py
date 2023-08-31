@@ -161,7 +161,7 @@ class BasicTrainer(object):
                                                       selection_strategy=config.selection_strategy,
                                                       beta=config.beta,
                                                       n_samples=config.n_unc_samples)
-            self.uncertainty_fn = compute_ae_uncertainty if config.selection_strategy is 'ae' else compute_us_uncertainty
+            self.uncertainty_fn = compute_ae_uncertainty if config.selection_strategy == 'ae' else compute_us_uncertainty
         else:
             self.train_iterator = get_shuffle_iterator(**data_iterator_kwargs, split='train', n_epochs=config.n_epochs, n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
         rank0_print(f'Loaded train data iterator')
@@ -282,11 +282,13 @@ class BasicTrainer(object):
 
 
         print(f"DTYPE: {next(self.policy.parameters()).dtype=}")
+        if self.config.do_first_eval:
+            self.evaluate()
+        if self.config.max_train_examples is not None:
+            pbar = tqdm.tqdm(total=config.max_train_examples, unit='examples')
+        else:
+            pbar = None
         for batch in self.train_iterator:
-            #### BEGIN EVALUATION ####
-            if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):
-                self.evaluate()
-            #### END EVALUATION ####
 
             torch.cuda.empty_cache()
             #### BEGIN TRAINING ####
@@ -332,7 +334,14 @@ class BasicTrainer(object):
                 rank0_print(f'skipping logging after {self.example_counter} examples to avoid logging too frequently')
             if self.config.max_train_examples is not None and self.example_counter > self.config.max_train_examples:
                 break
+            torch.cuda.empty_cache()
             #### END TRAINING ####
+            #### BEGIN EVALUATION ####
+            if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):
+                self.evaluate()
+            #### END EVALUATION ####
+            if pbar is not None:
+                pbar.update(self.example_counter)
         # evaluate one last time after training
         self.evaluate()
 
@@ -367,17 +376,19 @@ class BasicTrainer(object):
                 if self.is_jeopardy:
                     with torch.no_grad():
                         outputs = self.policy(local_eval_batch['prompt_input_ids'], attention_mask=local_eval_batch['prompt_attention_mask'])
-                        uncertainties = uncertainty_fn(batch=batch,
-                                                       policy=self.policy,
-                                                       ref_policy=ref_policy,
-                                                       n_samples=self.config.n_unc_samples,
-                                                       beta = self.config.beta)
                         logits = outputs.logits
                         probs = F.softmax(logits, dim=-1)
                         null_probs = probs[:, -1, self.null_token]
                         del outputs
                         del logits
                         del probs
+                if self.config.active:
+                    with torch.no_grad():
+                        uncertainties = self.uncertainty_fn(batch=local_eval_batch,
+                                                            policy=self.policy,
+                                                            ref_policy=self.reference_model,
+                                                            n_samples=self.config.n_unc_samples,
+                                                            beta = self.config.beta)
                 all_policy_samples.extend(policy_samples)
                 all_reference_samples.extend(reference_samples)
 

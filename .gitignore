@@ -8,3 +8,4 @@ data/
 /*.png
 !/images
 jeopardy_data*
+trained_models/

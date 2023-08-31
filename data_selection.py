@@ -264,16 +264,14 @@ def get_active_iterator(names: List[str],
         epoch_idx += 1
 
 
-def compute_means_variances(batch: List[Dict],
+def compute_means_variances(a1_input_ids: torch.Tensor,
+                            a1_attention_mask: torch.Tensor,
+                            a1_labels: torch.Tensor,
+                            a2_input_ids: torch.Tensor,
+                            a2_attention_mask: torch.Tensor,
+                            a2_labels: torch.Tensor,
                             policy: torch.nn.Module,
                             n_samples: int):
-    device = next(policy.parameters()).device
-    a1_input_ids = batch['chosen_input_ids'].to(device)
-    a1_attention_mask = batch['chosen_attention_mask'].to(device)
-    a1_labels = batch['chosen_labels'].to(device)
-    a2_input_ids = batch['rejected_input_ids'].to(device)
-    a2_attention_mask = batch['rejected_attention_mask'].to(device)
-    a2_labels = batch['rejected_labels'].to(device)
     ga1_mean, ga1_variance = predict_logits_with_dropout(policy, a1_input_ids, a1_attention_mask, a1_labels, n_samples)
     a1_mean = ga1_mean.to('cpu').float()
     a1_variance = ga1_variance.to('cpu').float()
@@ -284,12 +282,6 @@ def compute_means_variances(batch: List[Dict],
     a2_variance = ga2_variance.to('cpu').float()
     del ga2_mean
     del ga2_variance
-    del a1_input_ids
-    del a1_attention_mask
-    del a1_labels
-    del a2_input_ids
-    del a2_attention_mask
-    del a2_labels
     return a1_mean, a1_variance, a2_mean, a2_variance
 
 
@@ -298,7 +290,20 @@ def compute_ae_uncertainty(batch: List[Dict],
                            ref_policy: torch.nn.Module,
                            n_samples: int,
                            beta: float):
-    a1_mean, a1_variance, a2_mean, a2_variance = compute_means_variances(batch, policy, n_samples)
+    device = next(policy.parameters()).device
+    a1_input_ids = batch['chosen_input_ids'].to(device)
+    a1_attention_mask = batch['chosen_attention_mask'].to(device)
+    a1_labels = batch['chosen_labels'].to(device)
+    a2_input_ids = batch['rejected_input_ids'].to(device)
+    a2_attention_mask = batch['rejected_attention_mask'].to(device)
+    a2_labels = batch['rejected_labels'].to(device)
+    a1_mean, a1_variance, a2_mean, a2_variance = compute_means_variances(a1_input_ids,
+                                                                         a1_attention_mask,
+                                                                         a1_labels,
+                                                                         a2_input_ids,
+                                                                         a2_attention_mask,
+                                                                         a2_labels,
+                                                                         policy, n_samples)
     gref_logits_a1, todel1 = predict_logits_with_dropout(ref_policy, a1_input_ids, a1_attention_mask, a1_labels, 1)
     ref_logits_a1 = gref_logits_a1.to('cpu').float()
     del gref_logits_a1
@@ -312,6 +317,12 @@ def compute_ae_uncertainty(batch: List[Dict],
     upper_bounds = torch.max(a1_mean + beta * a1_std - ref_logits_a1, a2_mean + beta * a2_std - ref_logits_a2)
     lower_bounds = torch.max(a1_mean - beta * a1_std - ref_logits_a1, a2_mean - beta * a2_std - ref_logits_a2)
     uncertainties = upper_bounds - lower_bounds
+    del a1_input_ids
+    del a1_attention_mask
+    del a1_labels
+    del a2_input_ids
+    del a2_attention_mask
+    del a2_labels
     return uncertainties
 
 
@@ -319,7 +330,26 @@ def compute_us_uncertainty(batch: List[Dict],
                            policy: torch.nn.Module,
                            n_samples: int,
                            **kwargs):
-    a1_mean, a1_variance, a2_mean, a2_variance = compute_means_variances(batch, policy, n_samples)
+    device = next(policy.parameters()).device
+    a1_input_ids = batch['chosen_input_ids'].to(device)
+    a1_attention_mask = batch['chosen_attention_mask'].to(device)
+    a1_labels = batch['chosen_labels'].to(device)
+    a2_input_ids = batch['rejected_input_ids'].to(device)
+    a2_attention_mask = batch['rejected_attention_mask'].to(device)
+    a2_labels = batch['rejected_labels'].to(device)
+    a1_mean, a1_variance, a2_mean, a2_variance = compute_means_variances(a1_input_ids,
+                                                                         a1_attention_mask,
+                                                                         a1_labels,
+                                                                         a2_input_ids,
+                                                                         a2_attention_mask,
+                                                                         a2_labels,
+                                                                         policy, n_samples)
+    del a1_input_ids
+    del a1_attention_mask
+    del a1_labels
+    del a2_input_ids
+    del a2_attention_mask
+    del a2_labels
     uncertainties = (a1_variance + a2_variance) / 2
     return uncertainties
 

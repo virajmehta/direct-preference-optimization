@@ -24,7 +24,7 @@ import pickle
 OmegaConf.register_new_resolver("get_local_run_dir",
                                 lambda exp_name, local_dirs: get_local_run_dir(exp_name, local_dirs))
 
-torch.set_default_dtype(torch.float16)
+torch.set_default_dtype(torch.bfloat16)
 
 
 def worker_main(rank: int, world_size: int, config: DictConfig, policy: nn.Module,
@@ -62,6 +62,7 @@ def main(config: DictConfig):
 
     # Resolve hydra references, e.g. so we don't re-compute the run directory
     OmegaConf.resolve(config)
+    dtype = torch.bfloat16
 
     missing_keys: Set[str] = OmegaConf.missing_keys(config)
     if missing_keys:
@@ -92,7 +93,7 @@ def main(config: DictConfig):
         load_in_4bit=True,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16
+        bnb_4bit_compute_dtype=dtype,
     )
     policy = transformers.AutoModelForCausalLM.from_pretrained(
         config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
@@ -122,23 +123,23 @@ def main(config: DictConfig):
     policy = get_peft_model(policy, loraconfig)
     for name, module in policy.named_modules():
         if isinstance(module, LoraLayer):
-            module = module.to(torch.float16)
+            module = module.to(dtype)
         if 'norm' in name:
-            module = module.to(torch.float16)
+            module = module.to(dtype)
         if hasattr(module, 'weight'):
             if module.weight.dtype == torch.float32:
-                module = module.to(torch.float16)
+                module = module.to(dtype)
         if 'lm_head' in name or 'embed_tokens' in name:
             if hasattr(module, 'weight'):
                 if module.weight.dtype == torch.float32:
-                    module = module.to(torch.float16)
+                    module = module.to(dtype)
         # print(name, module.dtype)
     if config.epinet:
         epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
         policy = EpiNet(epinet_config, policy)
 
     if config.have_llm_dropout:
-        policy = DropoutModel(policy, config.llm_dropout)
+        policy = DropoutModel(policy, config.llm_dropout, dtype=dtype)
     print(policy)
     # Print dtypes of all layers in policy
     # for name, module in policy.named_modules():
@@ -162,18 +163,18 @@ def main(config: DictConfig):
         reference_model = get_peft_model(reference_model, loraconfig)
         for name, module in reference_model.named_modules():
             if isinstance(module, LoraLayer):
-                module = module.to(torch.float16)
+                module = module.to(dtype)
             if 'norm' in name:
-                module = module.to(torch.float16)
+                module = module.to(dtype)
             if hasattr(module, 'weight'):
                 if module.weight.dtype == torch.float32:
-                    module = module.to(torch.float16)
+                    module = module.to(dtype)
             if 'lm_head' in name or 'embed_tokens' in name:
                 if hasattr(module, 'weight'):
                     if module.weight.dtype == torch.float32:
-                        module = module.to(torch.float16)
+                        module = module.to(dtype)
         if config.have_llm_dropout:
-            reference_model = DropoutModel(reference_model, 0.)
+            reference_model = DropoutModel(reference_model, 0., dtype)
     else:
         reference_model = None
 
