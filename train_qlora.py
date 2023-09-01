@@ -26,6 +26,10 @@ OmegaConf.register_new_resolver("get_local_run_dir",
 
 torch.set_default_dtype(torch.float16)
 
+# Sleep for 8h
+# import time
+# time.sleep(8 * 60 * 60)
+
 
 def worker_main(rank: int, world_size: int, config: DictConfig, policy: nn.Module,
                 reference_model: Optional[nn.Module] = None):

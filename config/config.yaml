@@ -22,7 +22,7 @@ active: false
 # selection strategy for active selection
 # only matters if active is true
 # "ae" or "us"
-selection_strategy = "ae"
+selection_strategy: ae
 
 # which dataset(s) to train on; can pass a list like datasets=[hh,shp]
 datasets:
@@ -89,7 +89,7 @@ lambda_val: 0.1
 trainer: BasicTrainer
 
 # The optimizer to use; we use RMSprop because it works about as well as Adam and is more memory-efficient
-optimizer: Adam8bit
+optimizer: Lion8bit
 
 # number of linear warmup steps for the learning rate
 warmup_steps: 150

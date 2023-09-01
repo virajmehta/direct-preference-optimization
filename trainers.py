@@ -147,8 +147,7 @@ class BasicTrainer(object):
 
         # assert config.n_epochs is None, "For our method, we will always specify the number of examples"
         if config.active:
-            self.train_iterator = get_active_iterator(**data_iterator_kwargs, split='train', n_examples=config.n_examples, batch_size=config.batch_size,
-                                                      silent=rank != 0, cache_dir=get_local_dir(config.local_dirs), selection_strategy=config.selection_strategy)
+            self.train_iterator = get_active_iterator(**data_iterator_kwargs, split='train', n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
         else:
             self.train_iterator = get_shuffle_iterator(**data_iterator_kwargs, split='train', n_epochs=config.n_epochs, n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
         rank0_print(f'Loaded train data iterator')
