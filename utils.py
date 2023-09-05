@@ -178,14 +178,17 @@ class DropoutModel(nn.Module):
 
         self.model = model
         self.dropout = nn.Dropout(dropout).cuda()
-        self.linear = nn.Linear(32000, 32000).cuda().half()
+        # self.linear = nn.Linear(32000, 32000).cuda().half()
+        self.linear = nn.Linear(4096, 32000).cuda().half()
         self.config = model.config
 
     def forward(self, input_ids=None, attention_mask=None, labels=None):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        dropout_output = self.dropout(output[0])
+        dropout_output = self.dropout(output['hidden_states'][-1])
+        logits = self.model.base_model.lm_head(dropout_output).cuda()
 
-        logits = self.linear(dropout_output)
+        # dropout_output = self.dropout(output[0])
+        # logits = self.linear(dropout_output)
 
         return DropoutModelOutput(logits)
 
@@ -240,7 +243,7 @@ def _get_batch_logps(logits: torch.FloatTensor, labels: torch.LongTensor, averag
         softmax_list.append(logits[i].log_softmax(-1))
     logsoftmax_logits = torch.stack(softmax_list, dim=0)
     per_token_logps = torch.gather(logsoftmax_logits, dim=2, index=labels.unsqueeze(2)).squeeze(2)
-    
+
     # per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
 
     if average_log_prob:
