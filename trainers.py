@@ -268,8 +268,8 @@ class BasicTrainer(object):
         print(f"DTYPE: {next(self.policy.parameters()).dtype=}")
         for batch in self.train_iterator:
             #### BEGIN EVALUATION ####
-            # if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):
-            #     self.evaluate()
+            if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):
+                self.evaluate()
             #### END EVALUATION ####
 
             torch.cuda.empty_cache()

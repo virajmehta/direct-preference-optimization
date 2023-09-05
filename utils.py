@@ -179,14 +179,18 @@ class DropoutModel(nn.Module):
         self.model = model
         self.dropout = nn.Dropout(dropout).cuda()
         # self.linear = nn.Linear(32000, 32000).cuda().half()
-        self.linear = nn.Linear(4096, 32000).cuda().half()
+        # self.linear = nn.Linear(4096, 32000).cuda().half()
         self.config = model.config
 
     def forward(self, input_ids=None, attention_mask=None, labels=None):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
         dropout_output = self.dropout(output['hidden_states'][-1])
+        del output
         logits = self.model.base_model.lm_head(dropout_output).cuda()
-
+        # print(dir(output))
+        # ['logits']
+        # for i in range(len(output['hidden_states']) - 1):
+        #     del output['hidden_states'][i]
         # dropout_output = self.dropout(output[0])
         # logits = self.linear(dropout_output)
 
