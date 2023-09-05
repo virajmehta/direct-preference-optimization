@@ -102,6 +102,7 @@ def main(config: DictConfig):
         config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
         # torch_dtype=policy_dtype,
         quantization_config=bnb_config,
+        output_hidden_states=True,
         **model_kwargs)
     # policy.config.dtype = torch.bfloat16
     print(policy)
@@ -136,6 +137,12 @@ def main(config: DictConfig):
             if hasattr(module, 'weight'):
                 if module.weight.dtype == torch.float32:
                     module = module.to(torch.float16)
+        # if 'lm_head' in name:
+        #     module.training = True
+        #     module.weight.requires_grad = True
+        # if hasattr(module, 'weight'):
+        #     print(name, module.weight.requires_grad)
+        # print(name, module.training)
         # print(name, module.dtype)
     if config.epinet:
         epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
@@ -160,6 +167,7 @@ def main(config: DictConfig):
         reference_model = transformers.AutoModelForCausalLM.from_pretrained(
             config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
             quantization_config=bnb_config,
+            output_hidden_states=True,
             **model_kwargs)
         reference_model.gradient_checkpointing_enable()
         reference_model = prepare_model_for_kbit_training(reference_model)
@@ -176,6 +184,10 @@ def main(config: DictConfig):
                 if hasattr(module, 'weight'):
                     if module.weight.dtype == torch.float32:
                         module = module.to(torch.float16)
+
+        if config.epinet:
+            epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
+            reference_model = EpiNet(epinet_config, reference_model)
         if config.have_llm_dropout:
             reference_model = DropoutModel(reference_model, 0.)
     else:

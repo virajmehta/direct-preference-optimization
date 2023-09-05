@@ -268,8 +268,8 @@ class BasicTrainer(object):
         print(f"DTYPE: {next(self.policy.parameters()).dtype=}")
         for batch in self.train_iterator:
             #### BEGIN EVALUATION ####
-            if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):
-                self.evaluate()
+            # if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):
+            #     self.evaluate()
             #### END EVALUATION ####
 
             torch.cuda.empty_cache()
@@ -401,7 +401,7 @@ class BasicTrainer(object):
             if self.config.debug:
                 rank0_print('skipping save in debug mode')
             else:
-                output_dir = os.path.join(self.run_dir, f'dump')
+                output_dir = os.path.join(self.run_dir, f'LATEST')
                 rank0_print(f'creating checkpoint to write to {output_dir}...')
                 self.save(output_dir, mean_eval_metrics)
 
