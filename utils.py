@@ -243,7 +243,7 @@ def _get_batch_logps(logits: torch.FloatTensor, labels: torch.LongTensor, averag
     else:
         return (per_token_logps * loss_mask).sum(-1)
 
-def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_samples, minibatch_size=32):
+def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_samples, minibatch_size=24):
     """Predict with dropout, and return the mean and variance of the predictions."""
     was_training = model.training
     model.train()

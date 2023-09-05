@@ -285,7 +285,7 @@ class BasicTrainer(object):
         if self.config.do_first_eval:
             self.evaluate()
         if self.config.max_train_examples is not None:
-            pbar = tqdm.tqdm(total=config.max_train_examples, unit='examples')
+            pbar = tqdm.tqdm(total=self.config.max_train_examples, unit='examples')
         else:
             pbar = None
         for batch in self.train_iterator:
@@ -311,6 +311,7 @@ class BasicTrainer(object):
             self.optimizer.step()
             self.scheduler.step()
             self.optimizer.zero_grad()
+            del batch
 
             step_time = time.time() - start_time
             examples_per_second = self.config.batch_size / step_time
@@ -359,6 +360,7 @@ class BasicTrainer(object):
             all_policy_samples, all_reference_samples = [], []
 
         for eval_batch in (tqdm.tqdm(self.eval_batches) if self.rank == 0 else self.eval_batches):
+            start = time.time()
             local_eval_batch = slice_and_move_batch_for_device(eval_batch, self.rank, self.world_size, self.rank)
             with torch.no_grad():
                 _, eval_metrics = self.get_batch_metrics(local_eval_batch, self.config.loss, train=False)
