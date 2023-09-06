@@ -19,6 +19,11 @@ fsdp_port: 12355
 # should we do active data selection
 active: false
 
+# selection strategy for active selection
+# only matters if active is true
+# "ae" or "us"
+selection_strategy: ae
+
 # which dataset(s) to train on; can pass a list like datasets=[hh,shp]
 datasets:
 - hh
@@ -84,7 +89,7 @@ lambda_val: 0.1
 trainer: BasicTrainer
 
 # The optimizer to use; we use RMSprop because it works about as well as Adam and is more memory-efficient
-optimizer: RMSprop
+optimizer: Lion8bit
 
 # number of linear warmup steps for the learning rate
 warmup_steps: 150
@@ -95,8 +100,14 @@ activation_checkpointing: false
 # whether to use an epinet instead of dropout-based uncertainty
 epinet: False
 
-# evaluate and save model every eval_every steps
+# evaluate and save model every eval_every training samples
 eval_every: 2_500
+
+# max train examples (if None, go till the train iterator gives up)
+max_train_examples: null
+
+# whether to use the pretraining split of the data
+pretrain: True
 
 # prevent wandb from logging more than once per minimum_log_interval_secs
 minimum_log_interval_secs: 1.0
