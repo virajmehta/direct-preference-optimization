@@ -267,6 +267,9 @@ class BasicTrainer(object):
 
         print(f"DTYPE: {next(self.policy.parameters()).dtype=}")
         for batch in self.train_iterator:
+            cur_gpu_mem = torch.cuda.memory_allocated()
+            torch.cuda.empty_cache()
+            print(f'currently allocated: {cur_gpu_mem / 1e9:.2f} GB')
             #### BEGIN EVALUATION ####
             if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):
                 self.evaluate()
@@ -314,6 +317,11 @@ class BasicTrainer(object):
                 last_log = time.time()
             else:
                 rank0_print(f'skipping logging after {self.example_counter} examples to avoid logging too frequently')
+            max_gpu_mem_so_far = torch.cuda.max_memory_allocated()
+            print(f"Max allocated so far: {max_gpu_mem_so_far / 1e9:.2f} GB")
+            cur_gpu_mem = torch.cuda.memory_allocated()
+            print(f'currently allocated (after train): {cur_gpu_mem / 1e9:.2f} GB')
+            torch.cuda.reset_peak_memory_stats()
             if self.config.max_train_examples is not None and self.example_counter > self.config.max_train_examples:
                 break
             #### END TRAINING ####
@@ -325,7 +333,7 @@ class BasicTrainer(object):
         print('Beginning evaluation')
         cur_gpu_mem = torch.cuda.memory_allocated()
         torch.cuda.empty_cache()
-        print(f'currently allocated: {cur_gpu_mem}')
+        print(f'currently allocated: {cur_gpu_mem / 1e9:.2f} GB')
         torch.cuda.reset_peak_memory_stats()
         self.policy.eval()
 
@@ -377,9 +385,9 @@ class BasicTrainer(object):
             del eval_batch
             del local_eval_batch
         max_gpu_mem_so_far = torch.cuda.max_memory_allocated()
-        print(f"{max_gpu_mem_so_far=}")
+        print(f"Max allocated so far: {max_gpu_mem_so_far / 1e9:.2f}GB")
         cur_gpu_mem = torch.cuda.memory_allocated()
-        print(f'currently allocated: {cur_gpu_mem}')
+        print(f'currently allocated: {cur_gpu_mem / 1e9:.2f}GB')
 
         mean_eval_metrics = {k: sum(v) / len(v) for k, v in all_eval_metrics.items()}
         rank0_print(f'eval after {self.example_counter}: {formatted_dict(mean_eval_metrics)}')
