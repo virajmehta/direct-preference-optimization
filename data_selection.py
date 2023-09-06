@@ -58,7 +58,7 @@ def get_shuffle_iterator(names: List[str],
             this_flat_data = []
             truncation_mode = 'keep_end' if name == 'hh' else 'keep_start'
             dataset = get_dataset(name, split, silent=silent, cache_dir=cache_dir)
-            for prompt, data in get_dataset(name, split, silent=silent, cache_dir=cache_dir).items():
+            for prompt, data in dataset.items():
                 this_flat_data.append((prompt, data['responses'], data['pairs'], data['sft_target'], truncation_mode))
             if split == 'train':
                 split_idx = int(pretrain_fraction * len(this_flat_data))
