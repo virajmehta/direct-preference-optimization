@@ -3,7 +3,9 @@ import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 import torch.nn as nn
 import transformers
-from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
+from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft.tuners.lora import LoraLayer
+from transformers import BitsAndBytesConfig
 from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed, disable_dropout, DropoutModel
 from epinet import EpiNet, EpiNetConfig
 import os
@@ -23,25 +25,60 @@ from typing import Optional, Dict, List, Union, Tuple
 
 from utils import get_local_dir, rank0_print
 from data_selection import get_shuffle_iterator
+import math
 
 OmegaConf.register_new_resolver("get_local_run_dir",
                                 lambda exp_name, local_dirs: get_local_run_dir(exp_name, local_dirs))
 
-def predict_logits_with_variance(model, input_ids, attention_mask, labels, num_samples, dropout=False, average_logprob=False):
+def predict_logits_with_variance(model, input_ids, attention_mask, labels, num_samples, minibatch_size=1, dropout=False, average_logprob=False):
     """Predict with dropout, and return the mean and variance of the predictions."""
     if dropout:
         was_training = model.training
         model.train()
+
+    n = input_ids.size(0)
+    batch_count = math.ceil(n / minibatch_size)
+    # print(f"batch_count: {batch_count}")
+
+    logps_list = []
     with torch.no_grad():
-        outputs = [model(input_ids, attention_mask=attention_mask) for _ in range(num_samples)]
-        logits = [output.logits.cpu() for output in outputs]
-        logps = [_get_batch_logps(logit, labels, average_log_prob=average_logprob) for logit in logits]
-        predictions = torch.stack(logps)
-        mean = predictions.mean(dim=0)
-        variance = predictions.var(dim=0)
+        for batch_idx in range(batch_count):
+            # print(f"batch_idx: {batch_idx}")
+            start_idx = batch_idx * minibatch_size
+            end_idx = min((batch_idx + 1) * minibatch_size, n)
+            input_ids_batch = input_ids[start_idx:end_idx]
+            attention_mask_batch = attention_mask[start_idx:end_idx]
+            labels_batch = labels[start_idx:end_idx]
+            # print("Starting inference")
+
+            # outputs = [model(input_ids_batch, attention_mask=attention_mask_batch) for _ in range(num_samples)]
+            # print('Finish inference')
+            # logits = [output.logits for output in outputs]
+            # logps = [_get_batch_logps(logit, labels_batch) for logit in logits]
+
+            outputs = model(input_ids_batch.unsqueeze(1).repeat(1, num_samples, 1).reshape(-1, input_ids_batch.size(1)),
+                            attention_mask=attention_mask_batch.unsqueeze(1).repeat(1, num_samples, 1).reshape(-1,
+                                                                                                               attention_mask_batch.size(
+                                                                                                                   1)))
+            # print('Finish inference')
+            outputs.logits = outputs.logits.reshape(input_ids_batch.size(0), num_samples, input_ids_batch.size(1), -1)
+            logits = [outputs.logits[:, idx, :, :].squeeze(1) for idx in range(outputs.logits.shape[1])]
+            logps = [_get_batch_logps(logit, labels_batch, average_log_prob=average_logprob) for logit in logits]
+
+            logps_list.append(torch.stack(logps))
+
+    predictions = torch.cat(logps_list, dim=1)
+    mean = predictions.mean(dim=0)
+    variance = predictions.var(dim=0)
+    del input_ids
+    del attention_mask
+    del labels
+
     if dropout:
         if not was_training:
             model.eval()
+    return mean, variance
+
     return mean, variance
 
 
@@ -118,8 +155,9 @@ class Evaluator(object):
             # print(variance.shape)
             variance = variance.cpu().numpy().tolist()
             variances.extend(variance)
-            # print(f'Variance: {variance}')
+            print(f'Variance: {variance}')
         return variances
+
 
     def get_batch_samples(self, batch: Dict[str, torch.LongTensor]) -> Tuple[str, str]:
         """Generate samples from the policy (and reference model, if doing DPO training) for the given batch of inputs."""
@@ -159,13 +197,28 @@ class Evaluator(object):
 @hydra.main(version_base=None, config_path="config", config_name="config_uncertainty")
 def main(config: DictConfig):
     print('Before')
-    model_kwargs = {'device_map': 'balanced'}
+    model_kwargs = {'device_map': 'auto'}
     policy_dtype = getattr(torch, config.model.policy_dtype)
+    print('policy_dtype', policy_dtype)
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16
+    )
     policy = transformers.AutoModelForCausalLM.from_pretrained(
         config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
-        torch_dtype=policy_dtype,
-        # quantization_config=quant_config,
+        # torch_dtype=policy_dtype,
+        quantization_config=bnb_config,
+        output_hidden_states=True,
         **model_kwargs)
+    # policy.config.dtype = torch.bfloat16
+    print(policy)
+    # if not config.dropout:
+    #     disable_dropout(policy)
+    policy.gradient_checkpointing_enable()
+    policy = prepare_model_for_kbit_training(policy)
+
     if 'pythia' in config.model.name_or_path:
         target_modules = ['query_key_value']
     elif 'llama' in config.model.name_or_path:
@@ -180,9 +233,23 @@ def main(config: DictConfig):
     )
 
     policy = get_peft_model(policy, loraconfig)
+    for name, module in policy.named_modules():
+        if isinstance(module, LoraLayer):
+            module = module.to(torch.float16)
+        if 'norm' in name:
+            module = module.to(torch.float16)
+        if hasattr(module, 'weight'):
+            if module.weight.dtype == torch.float32:
+                module = module.to(torch.float16)
+        if 'lm_head' in name or 'embed_tokens' in name:
+            if hasattr(module, 'weight'):
+                if module.weight.dtype == torch.float32:
+                    module = module.to(torch.float16)
+        # print(name, module.dtype)
     if config.epinet:
         epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
         policy = EpiNet(epinet_config, policy)
+
     if config.have_llm_dropout:
         policy = DropoutModel(policy, config.llm_dropout)
     state = torch.load(f'{get_local_dir(config.local_dirs)}/{config.model_dir}/policy.pt', map_location='cuda:0')['state']

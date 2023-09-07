@@ -187,13 +187,13 @@ class DropoutModel(nn.Module):
         dropout_output = self.dropout(output['hidden_states'][-1])
         del output
         logits = self.model.base_model.lm_head(dropout_output).cuda()
+        del dropout_output
         # print(dir(output))
         # ['logits']
         # for i in range(len(output['hidden_states']) - 1):
         #     del output['hidden_states'][i]
         # dropout_output = self.dropout(output[0])
         # logits = self.linear(dropout_output)
-
         return DropoutModelOutput(logits)
 
     def generate(self, inputs, attention_mask, max_length, do_sample, pad_token_id):
