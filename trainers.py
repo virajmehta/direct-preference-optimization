@@ -17,6 +17,7 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp.api import FullStateDictConfig, FullOptimStateDictConfig
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 import tensor_parallel as tp
+import bitsandbytes as bnb
 
 from data_selection import get_shuffle_iterator, get_active_iterator
 from utils import (
@@ -135,6 +136,9 @@ class BasicTrainer(object):
             max_length=config.max_length,
             max_prompt_length=config.max_prompt_length,
             sft_mode=config.loss.name == 'sft',
+            pretrain_mode=config.pretrain,
+            policy=policy,
+            ref_policy=reference_model,
         )
 
         self.policy = policy
@@ -233,7 +237,7 @@ class BasicTrainer(object):
         """Begin either SFT or DPO training, with periodic evaluation."""
 
         rank0_print(f'Using {self.config.optimizer} optimizer')
-        self.optimizer = getattr(torch.optim, self.config.optimizer)(self.policy.parameters(), lr=self.config.lr)
+        self.optimizer = getattr(bnb.optim, self.config.optimizer)(self.policy.parameters(), lr=self.config.lr)
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda step: min(1.0, (step + 1) / (self.config.warmup_steps + 1)))
 
         torch.manual_seed(self.seed)
@@ -261,12 +265,14 @@ class BasicTrainer(object):
                 self.reference_text_table = wandb.Table(columns=cols)
 
 
+        print(f"DTYPE: {next(self.policy.parameters()).dtype=}")
         for batch in self.train_iterator:
             #### BEGIN EVALUATION ####
             if self.example_counter % self.config.eval_every == 0 and (self.example_counter > 0 or self.config.do_first_eval):
                 self.evaluate()
             #### END EVALUATION ####
 
+            torch.cuda.empty_cache()
             #### BEGIN TRAINING ####
             self.policy.train()
 
@@ -308,6 +314,8 @@ class BasicTrainer(object):
                 last_log = time.time()
             else:
                 rank0_print(f'skipping logging after {self.example_counter} examples to avoid logging too frequently')
+            if self.config.max_train_examples is not None and self.example_counter > self.config.max_train_examples:
+                break
             #### END TRAINING ####
         # evaluate one last time after training
         self.evaluate()
@@ -316,6 +324,7 @@ class BasicTrainer(object):
         rank0_print(f'Running evaluation after {self.example_counter} train examples')
         print('Beginning evaluation')
         cur_gpu_mem = torch.cuda.memory_allocated()
+        torch.cuda.empty_cache()
         print(f'currently allocated: {cur_gpu_mem}')
         torch.cuda.reset_peak_memory_stats()
         self.policy.eval()
@@ -392,7 +401,7 @@ class BasicTrainer(object):
             if self.config.debug:
                 rank0_print('skipping save in debug mode')
             else:
-                output_dir = os.path.join(self.run_dir, f'dump')
+                output_dir = os.path.join(self.run_dir, f'LATEST')
                 rank0_print(f'creating checkpoint to write to {output_dir}...')
                 self.save(output_dir, mean_eval_metrics)
 
@@ -538,4 +547,3 @@ class TensorParallelTrainer(BasicTrainer):
 
         self.write_state_dict(self.example_counter, policy_state_dict, metrics, 'policy.pt', output_dir)
         del policy_state_dict
-
