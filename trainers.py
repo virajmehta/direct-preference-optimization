@@ -157,13 +157,15 @@ class BasicTrainer(object):
 
     def get_batch_samples(self, batch: Dict[str, torch.LongTensor]) -> Tuple[str, str]:
         """Generate samples from the policy (and reference model, if doing DPO training) for the given batch of inputs."""
-
+        min_new_tokens = 1 if self.is_jeopardy else 0
         with torch.no_grad():
             policy_output = self.policy.generate(
-                inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id)
+                inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length,
+                do_sample=True, pad_token_id=self.tokenizer.pad_token_id, min_new_tokens=min_new_tokens)
             if self.config.loss.name == 'dpo':
                 reference_output = self.reference_model.generate(
-                    inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id)
+                    inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id,
+                    min_new_tokens=min_new_tokens)
 
             policy_output = pad_to_length(policy_output, self.config.max_length, self.tokenizer.pad_token_id)
             policy_output = all_gather_if_needed(policy_output, self.rank, self.world_size)
@@ -255,6 +257,7 @@ class BasicTrainer(object):
         if self.is_jeopardy:
             cols.append('null_prob')
             cols.append('correct_answer')
+            cols.append('null_is_max')
             self.null_token = self.tokenizer.eos_token_id
         if self.config.sample_during_eval:
             self.policy_text_table = wandb.Table(columns=cols)
@@ -362,6 +365,7 @@ class BasicTrainer(object):
                         logits = outputs.logits
                         probs = F.softmax(logits, dim=-1)
                         null_probs = probs[:, -1, self.null_token]
+                        null_is_max = torch.argmax(probs, dim=-1) == self.null_token
                         del outputs
                         del logits
                         del probs
@@ -373,6 +377,7 @@ class BasicTrainer(object):
                     if self.is_jeopardy:
                         inputs.append(null_probs[i].item())
                         inputs.append(eval_batch['chosen_response_only'][i])
+                        inputs.append(null_is_max[i].item())
                     self.policy_text_table.add_data(*inputs)
                 if self.is_jeopardy:
                     del null_probs
