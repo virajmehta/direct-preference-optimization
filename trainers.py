@@ -255,7 +255,7 @@ class BasicTrainer(object):
         if self.is_jeopardy:
             cols.append('null_prob')
             cols.append('correct_answer')
-            self.null_token = self.tokenizer.convert_tokens_to_ids('NULL')
+            self.null_token = self.tokenizer.eos_token_id
         if self.config.sample_during_eval:
             self.policy_text_table = wandb.Table(columns=cols)
             if self.config.loss.name == 'dpo':
