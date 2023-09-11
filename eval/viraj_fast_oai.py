@@ -47,7 +47,7 @@ class TokenBucket:
 MaybeTokenBucket = Optional[TokenBucket]
 
 
-async def _call_chat(system_prompt: str, user_prompt:str, token_bucket: MaybeTokenBucket=None) -> str:
+async def _call_chat(system_prompt: str, user_prompt:str, token_bucket: MaybeTokenBucket=None, model="gpt-3.5-turbo") -> str:
     done = False
     messages= [
             {"role": "system", "content": system_prompt},
@@ -58,7 +58,7 @@ async def _call_chat(system_prompt: str, user_prompt:str, token_bucket: MaybeTok
             if token_bucket is not None:
                 await token_bucket.consume()
             response = await openai.ChatCompletion.acreate(
-                model="gpt-3.5-turbo",
+                model=model,
                 messages=messages,
                 )
             completion = response.choices[0].message.content
@@ -69,7 +69,7 @@ async def _call_chat(system_prompt: str, user_prompt:str, token_bucket: MaybeTok
     return completion
 
 
-async def _handle_chat(system_prompt: str, user_prompt: str, token_bucket: TokenBucket, semaphore: Semaphore) -> str:
+async def _handle_chat(system_prompt: str, user_prompt: str, token_bucket: TokenBucket, semaphore: Semaphore, model: str) -> str:
     async with semaphore:
         completion = await _call_chat(system_prompt, user_prompt, token_bucket)
     global num_requests
@@ -80,19 +80,20 @@ async def _handle_chat(system_prompt: str, user_prompt: str, token_bucket: Token
     return completion
 
 
-def call_chats(prompts: List[Tuple[str, str]]) -> List[str]:
+def call_chats(prompts: List[Tuple[str, str]], model: str="gpt-3.5-turbo") -> List[str]:
     # prompts should be [(system_prompt, user_prompt), ...]
     global start
     start = time()
     global num_requests
     num_requests = 0
     max_concurrent_tasks = 20
-    oai_quota_per_minute = 200
+    oai_quotas = {'gpt-3.5-turbo': 3500, 'gpt-4': 200}
+    oai_quota_per_minute = oai_quotas[model]
     oai_quota_per_second = oai_quota_per_minute // 60
     semaphore = Semaphore(max_concurrent_tasks)
     token_bucket = TokenBucket(oai_quota_per_second)
     async def gather_tasks():
-        tasks = [_handle_chat(system_prompt, user_prompt, token_bucket, semaphore) for system_prompt, user_prompt in prompts]
+        tasks = [_handle_chat(system_prompt, user_prompt, token_bucket, semaphore, model) for system_prompt, user_prompt in prompts]
         return await asyncio.gather(*tasks)
     return asyncio.run(gather_tasks())
 
