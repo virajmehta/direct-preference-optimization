@@ -9,9 +9,8 @@ import logging
 from time import time, sleep
 
 
-if __name__ == '__main__':
-    dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
-    load_dotenv(dotenv_path)
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path)
 
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -73,7 +72,7 @@ async def _handle_chat(system_prompt: str, user_prompt: str, token_bucket: Token
     async with semaphore:
         completion = await _call_chat(system_prompt, user_prompt, token_bucket)
     global num_requests
-    if num_requests % 1000 == 0:
+    if num_requests % 100 == 0:
         duration = time() - start
         duration_min = duration / 60
         print(f"{num_requests=}, {duration=:.2f} rate per min={num_requests / duration_min:.2f}")
