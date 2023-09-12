@@ -34,6 +34,11 @@ def get_decision_name(stem1: str, stem2: str) -> str:
     return f"{stem1}_vs_{stem2}_decision"
 
 def main(csv_paths: List[str]):
+    """
+    Takes a list of paths that are all comparable (as in came from the same dataset and protocol).
+
+    Creates a merged df with columns for the winners between each of the pairs. This should be suitable for learning curve generation downstream.
+    """
     csv_paths = [Path(p) for p in csv_paths]
     dfs = [pd.read_csv(p) for p in csv_paths]
     breakpoint()
