@@ -19,10 +19,10 @@ def get_remote_file(remote_path, local_path=None):
     local_hostname = socket.gethostname()
     if hostname == local_hostname or hostname == local_hostname[:local_hostname.find('.')]:
         return path
-    
+
     if local_path is None:
         local_path = path
-    # local_path = local_path.replace('/scr-ssd', '/scr')    
+    # local_path = local_path.replace('/scr-ssd', '/scr')
     if os.path.exists(local_path):
         return local_path
     local_dir = os.path.dirname(local_path)
@@ -93,7 +93,7 @@ def all_gather_if_needed(values: torch.Tensor, rank: int, world_size: int) -> to
 def formatted_dict(d: Dict) -> Dict:
     """Format a dictionary for printing."""
     return {k: (f"{v:.5g}" if type(v) == float else v) for k, v in d.items()}
-    
+
 
 def disable_dropout(model: torch.nn.Module):
     """Disable dropout in a model."""
@@ -179,7 +179,6 @@ class DropoutModel(nn.Module):
         self.model = model
         self.dropout = nn.Dropout(dropout).cuda()
         # self.linear = nn.Linear(32000, 32000).cuda().half()
-        # self.linear = nn.Linear(4096, 32000).cuda().half()
         self.config = model.config
 
     def forward(self, input_ids=None, attention_mask=None, labels=None):
@@ -193,7 +192,6 @@ class DropoutModel(nn.Module):
         #     del output['hidden_states'][i]
         # dropout_output = self.dropout(output[0])
         # logits = self.linear(dropout_output)
-
         return DropoutModelOutput(logits)
 
     def generate(self, inputs, attention_mask, max_length, do_sample, pad_token_id):

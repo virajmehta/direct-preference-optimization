@@ -179,8 +179,12 @@ def get_jeopardy(split: str, silent: bool = False, cache_dir: str = None) -> Dic
         answer = elt['answer']
         wrong_answer = elt['wrong_answer']
         prompt = f'{category}, for {value}: {question}'
-        responses = [answer, 'null', wrong_answer]
+        # change null token to empty string
+        # responses = [answer, 'null', wrong_answer]
+        responses = [answer, "", wrong_answer]
         pairs = [(0, 1), (0, 2), (1, 2)]
+        # take a single sample
+        pairs = [random.choice(pairs)]
         return prompt, dict(responses=responses, pairs=pairs, sft_target=answer)
     all_data = {}
     for row in tqdm.tqdm(data, desc="Processing Jeopardy!", disable=silent):
