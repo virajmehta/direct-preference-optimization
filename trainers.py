@@ -365,7 +365,7 @@ class BasicTrainer(object):
                         logits = outputs.logits
                         probs = F.softmax(logits, dim=-1)
                         null_probs = probs[:, -1, self.null_token]
-                        null_is_max = torch.argmax(probs, dim=-1) == self.null_token
+                        null_is_max = torch.argmax(probs[:, -1, :], dim=-1) == self.null_token
                         del outputs
                         del logits
                         del probs

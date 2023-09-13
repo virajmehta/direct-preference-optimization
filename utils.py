@@ -194,8 +194,9 @@ class DropoutModel(nn.Module):
         # logits = self.linear(dropout_output)
         return DropoutModelOutput(logits)
 
-    def generate(self, inputs, attention_mask, max_length, do_sample, pad_token_id):
-        return self.model.generate(inputs=inputs, attention_mask=attention_mask, max_length=max_length, do_sample=do_sample, pad_token_id=pad_token_id)
+    def generate(self, inputs, attention_mask, max_length, do_sample, pad_token_id, **kwargs):
+        return self.model.generate(inputs=inputs, attention_mask=attention_mask, max_length=max_length,
+                                   do_sample=do_sample, pad_token_id=pad_token_id, **kwargs)
 
 class DropoutModelOutput():
     def __init__(self, logits):
