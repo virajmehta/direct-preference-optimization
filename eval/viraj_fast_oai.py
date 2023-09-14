@@ -1,10 +1,9 @@
 import openai
 import os
 from dotenv import load_dotenv
-import numpy as np
 from typing import List, Optional, Tuple
 import asyncio
-from asyncio import Semaphore
+from asyncio import Semaphore, Lock
 import logging
 from time import time, sleep
 
@@ -33,8 +32,6 @@ class TokenBucket:
             self._refill()
             await asyncio.sleep(1)  # Sleep for some time before trying again
         self._tokens -= 1
-        global num_requests
-        num_requests += 1
 
     def _refill(self):
         now = time()
@@ -46,53 +43,86 @@ class TokenBucket:
 MaybeTokenBucket = Optional[TokenBucket]
 
 
-async def _call_chat(system_prompt: str, user_prompt:str, token_bucket: MaybeTokenBucket=None, model="gpt-3.5-turbo") -> str:
+async def _call_chat(system_prompt: str,
+                     user_prompt:str,
+                     temperature: float=1.,
+                     token_bucket: MaybeTokenBucket=None,
+                     timeout: int=20,
+                     max_retries=5,
+                     model="gpt-3.5-turbo-16k") -> str:
     done = False
     messages= [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+    backoff = 1
+    retries = 0
     while not done:
         try:
             if token_bucket is not None:
                 await token_bucket.consume()
-            response = await openai.ChatCompletion.acreate(
+            response = await asyncio.wait_for(openai.ChatCompletion.acreate(
                 model=model,
                 messages=messages,
-                )
+                ), timeout=timeout)
             completion = response.choices[0].message.content
             done=True
+        except asyncio.TimeoutError:
+            if backoff > 60:
+                print(f"Failed to call chat after {backoff} seconds due to  {e}")
+            await asyncio.sleep(backoff)
+            backoff *= 2
         except Exception as e:
-            if token_bucket is None:
-                sleep(1)
+            await asyncio.sleep(backoff)
+            backoff *= 2
+            backoff = min(backoff, 64)
+            retries += 1
+            if retries >= max_retries:
+                print(f"Failed to call chat after {retries} retries due to  {e}:\n\nMessages:{messages}\n\n")
+                completion = None
+                done = True
     return completion
 
 
-async def _handle_chat(system_prompt: str, user_prompt: str, token_bucket: TokenBucket, semaphore: Semaphore, model: str) -> str:
+async def _handle_chat(system_prompt: str, user_prompt: str,
+                       token_bucket: TokenBucket, semaphore: Semaphore, lock: Lock, results_counter: dict,
+                       model: str, timeout: int, temperature: float) -> str:
     async with semaphore:
-        completion = await _call_chat(system_prompt, user_prompt, token_bucket)
-    global num_requests
-    if num_requests % 100 == 0:
-        duration = time() - start
-        duration_min = duration / 60
-        print(f"{num_requests=}, {duration=:.2f} rate per min={num_requests / duration_min:.2f}")
+        completion = await _call_chat(system_prompt=system_prompt,
+                                      user_prompt=user_prompt,
+                                      temperature=temperature,
+                                      token_bucket=token_bucket,
+                                      timeout=timeout,
+                                      model=model)
+
+    async with lock:  # Ensure atomicity of operations
+        results_counter['num_requests'] += 1
+        print_period = 10
+        if results_counter['num_requests'] % print_period == 0:
+            duration = time() - results_counter['start_time']
+            duration_min = duration / 60
+            print(f"{results_counter['num_requests']=}, {duration=:.2f} rate per min={results_counter['num_requests'] / duration_min:.2f}")
+
     return completion
 
 
-def call_chats(prompts: List[Tuple[str, str]], model: str="gpt-3.5-turbo") -> List[str]:
+def call_chats(prompts: List[Tuple[str, str]],
+               model: str="gpt-3.5-turbo-16k",
+               timeout: int=10,
+               temperature: float=1.) -> List[str]:
     # prompts should be [(system_prompt, user_prompt), ...]
-    global start
-    start = time()
-    global num_requests
-    num_requests = 0
     max_concurrent_tasks = 20
-    oai_quotas = {'gpt-3.5-turbo': 3500, 'gpt-4': 200}
+    oai_quotas = {'gpt-3.5-turbo': 200, 'gpt-3.5-turbo-16k': 200, 'gpt-4': 200}
     oai_quota_per_minute = oai_quotas[model]
     oai_quota_per_second = oai_quota_per_minute // 60
     semaphore = Semaphore(max_concurrent_tasks)
     token_bucket = TokenBucket(oai_quota_per_second)
+    lock = Lock()
+    results_counter = {'num_requests': 0, 'start_time': time()}
     async def gather_tasks():
-        tasks = [_handle_chat(system_prompt, user_prompt, token_bucket, semaphore, model) for system_prompt, user_prompt in prompts]
+        tasks = [_handle_chat(system_prompt, user_prompt, token_bucket, semaphore,
+                              lock, results_counter,
+                              model, timeout, temperature) for system_prompt, user_prompt in prompts]
         return await asyncio.gather(*tasks)
     return asyncio.run(gather_tasks())
 
