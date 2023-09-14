@@ -19,8 +19,8 @@ def system_prompt_gen():
 
 def get_user_prompt(row, sample_1_name, sample_2_name):
     prompt = row["prompt"]
-    sample1 = row[sample_1_name]
-    sample2 = row[sample_2_name]
+    sample1 = row[sample_1_name][len(prompt):]
+    sample2 = row[sample_2_name][len(prompt):]
     return user_prompt.format(prompt=prompt, sample1=sample1, sample2=sample2)
 
 
@@ -45,13 +45,11 @@ def asof_merge_dfs(dfs, on, additional_merge_col):
         merged_df = merged_df.sort_values(by=on)
         df_dropped = df_dropped.sort_values(by=on)
 
-        breakpoint()
         # Perform the asof merge
-        merged_df = pd.merge_asof(merged_df, df_dropped, on=on, direction='nearest', suffixes=('', f'_df{i+1}'))
+        merged_df = pd.merge_asof(merged_df, df_dropped, on=on, by=additional_merge_col, direction='nearest', suffixes=('', f'_df{i+1}'))
 
-    breakpoint()
-    # After all asof merges are done, perform a final regular merge on 'prompt'
-    merged_df = pd.merge(merged_df, df, on=additional_merge_col, suffixes=('', f'_final'))
+        # After all asof merges are done, perform a final regular merge on 'prompt'
+        # merged_df = pd.merge(merged_df, df, on=additional_merge_col, suffixes=('', f'_final'))
 
     return merged_df
 
@@ -109,7 +107,6 @@ def main(paths: List[str]):
             logging.warning(f"Skipping pair {stem_pair} because it already exists")
             continue
         merged_df[user_prompt_name] = merged_df.apply(lambda row: get_user_prompt(row, get_name(stem1), get_name(stem2)), axis=1)
-        breakpoint()
         completions = call_chats(zip(system_prompt_gen(), merged_df[user_prompt_name].tolist()), temperature=0.1)
         vals = []
         for i, dec in enumerate(completions):
