@@ -68,9 +68,12 @@ async def _call_chat(system_prompt: str,
             completion = response.choices[0].message.content
             total_tokens = response.usage.total_tokens
             done=True
-        except asyncio.TimeoutError:
-            if backoff > 60:
+        except asyncio.TimeoutError as e:
+            if backoff > 128:
                 print(f"Failed to call chat after {backoff} seconds due to  {e}")
+                completion = None
+                total_tokens = 0
+                done = True
             await asyncio.sleep(backoff)
             backoff *= 2
         except Exception as e:
@@ -116,7 +119,7 @@ def call_chats(prompts: List[Tuple[str, str]],
                temperature: float=1.) -> List[str]:
     # prompts should be [(system_prompt, user_prompt), ...]
     max_concurrent_tasks = 20
-    oai_quotas = {'gpt-3.5-turbo': 200, 'gpt-3.5-turbo-16k': 200, 'gpt-4': 200}
+    oai_quotas = {'gpt-3.5-turbo': 150, 'gpt-3.5-turbo-16k': 200, 'gpt-4': 200}
     oai_costs_per_ktok = {'gpt-3.5-turbo': 0.0015, 'gpt-3.5-turbo-16k': 0.003, 'gpt-4': 0.03}
     oai_quota_per_minute = oai_quotas[model]
     oai_quota_per_second = oai_quota_per_minute // 60
