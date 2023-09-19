@@ -139,6 +139,7 @@ class BasicTrainer(object):
             pretrain_mode=config.pretrain,
             policy=policy,
             ref_policy=reference_model,
+            beta=config.active_beta,
         )
 
         self.policy = policy
