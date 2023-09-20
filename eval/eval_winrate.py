@@ -43,7 +43,7 @@ def main(csv_path, dataset_name):
             logging.warning(f"Unexpected decision {dec} on row {i}")
             vals.append(dec)
     df['model_result'] = vals
-    df.to_csv('test.csv', index=False)
+    df.to_csv(csv_path, index=False)
 
 if __name__ == '__main__':
     main(*sys.argv[1:])
