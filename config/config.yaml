@@ -77,6 +77,9 @@ n_epochs: 1
 # whether to use dropout during training
 dropout: True
 
+# the exploration parameter for active selection
+active_beta: 2.
+
 # the number of examples to train for; if null, must specify n_epochs
 n_examples: null
 
