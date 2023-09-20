@@ -1,0 +1,49 @@
+import sys
+from pathlib import Path
+import pandas as pd
+import logging
+import pickle
+from viraj_fast_oai import call_chats
+sys.path.append('..')
+from preference_datasets import get_dataset
+
+system_prompt = "Please act as an impartial judge and evaluate the quality of the responses provided by two AI assistants to the user question displayed below. You should choose the assistant that follows the user's instructions and answers the user's question better. Your evaluation should consider factors such as the helpfulness, relevance, accuracy, depth, creativity, and level of detail of their responses. Avoid any position biases and ensure that the order in which the responses were presented does not influence your decision. Do not allow the length of the responses to influence your evaluation. Do not favor certain names of the assistants. Be as objective as possible. Output your final verdict by strictly following this format: 'A' if assistant A is better, 'B' if assistant B is better, and 'C' for a tie. Output only that character and do not include any other characters or spaces."
+
+user_prompt = "[User Question]\n{prompt}\n[The Start of Assistant A's Answer]\n{sample1}\n[The End of Assistant A's Answer]\n[The Start of Assistant B's Answer]\n{sample2}\n[The End of Assistant B's Answer]\n"
+
+
+def get_user_prompt(row):
+    prompt = row["prompt"]
+    sample1 = row['sample_only']
+    sample2 = row['sft_target']
+    return user_prompt.format(prompt=prompt, sample1=sample1, sample2=sample2)
+
+def main(csv_path, dataset_name):
+    csv_path = Path(csv_path)
+
+    df = pd.read_csv(csv_path)
+    dataset = get_dataset(dataset_name, split='test')
+    keys = list(dataset.keys())
+    df['sample_only'] = df.apply(lambda row: row['sample'][len(row['prompt']):], axis=1)
+    df['sft_target'] = df.apply(lambda row: dataset[row['prompt']]['sft_target'], axis=1)
+
+    df['user_prompt'] = df.apply(get_user_prompt, axis=1)
+    user_prompt_list = df['user_prompt'].tolist()
+    system_prompt_gen = (system_prompt for _ in range(len(user_prompt_list)))
+    completions = call_chats(zip(system_prompt_gen, user_prompt_list))
+    vals = []
+    for i, dec in enumerate(completions):
+        if dec == 'A':
+            vals.append("Win")
+        elif dec == 'B':
+            vals.append("Lose")
+        elif dec == 'C':
+            vals.append('Tie')
+        else:
+            logging.warning(f"Unexpected decision {dec} on row {i}")
+            vals.append(dec)
+    df['model_result'] = vals
+    df.to_csv('test.csv', index=False)
+
+if __name__ == '__main__':
+    main(*sys.argv[1:])
