@@ -1,82 +1,27 @@
-import csv
-import openai
-# import json
-import os
-from dotenv import load_dotenv, find_dotenv
+import sys
+from pathlib import Path
+import pandas as pd
+import logging
+import pickle
+from viraj_fast_oai import call_chats
 
-input_csv_filename = "wandb_export_2023-08-23T13_45_36.658-04_00.csv"
-output_csv_filename = "jeopardy_eval_result.csv"
+system_prompt = "You are a judge on whether a contestant answer to Jeopardy is correct given a correct answer. If you don't see the correct answer it is not correct. Answer 'Yes' or 'No' is sufficient. Please don't use any other words."
 
-#------- JSON -------
-# json_filename = "test_jeopardy_data.json"
-# f = open(json_filename)
-# test_jeopardy_data = json.load(f)
+def get_user_prompt(row):
+    return f"Correct answer is: \"{row['correct_answer']}\". Contestant Answer: \"{row['sample_only']}\""
 
-fields = []
-output = []
-null_threshold = 0.01
+def main(csv_path):
+    csv_path = Path(csv_path)
 
-MODEL = "gpt-3.5-turbo"
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+    df = pd.read_csv(csv_path)
+    df['sample_only'] = df.apply(lambda row: row['sample'][len(row['prompt']):], axis=1)
 
-with open(input_csv_filename, 'r') as csvinput:
-    with open(output_csv_filename, 'w') as csvoutput:
-        # creating a csv reader object
-        reader = csv.reader(csvinput)
-        writer = csv.writer(csvoutput, lineterminator='\n')
-        
-        # extracting field names through first row
-        fields = next(reader)
-        fields.append('evaluation')
+    df['user_prompt'] = df.apply(get_user_prompt, axis=1)
+    user_prompt_list = df['user_prompt'].tolist()
+    system_prompt_gen = (system_prompt for _ in range(len(user_prompt_list)))
+    completions = call_chats(zip(system_prompt_gen, user_prompt_list))
+    df['correct'] = completions
+    df.to_csv('test.csv', index=False)
 
-        # add the fields to output
-        output.append(fields)
-
-        # get index of wanted field
-        prompt_index = fields.index("prompt")
-        sample_index = fields.index("sample")
-        null_index = fields.index("null_prob")
-        correct_answer_index = fields.index("correct_answer")
-    
-        # extracting each data row one by one
-        for row in reader:
-
-            #------- JSON -------
-            # prompt = row[prompt_index].split(':')[-1].strip()
-            # correct_answer = [obj for obj in test_jeopardy_data if obj.get('question')==prompt][0].get('answer')
-
-            if float(row[null_index]) <= null_threshold:
-                prompt_length = row[prompt_index].__len__()
-                sample = row[sample_index][prompt_length+1:]
-                row[sample_index] = sample
-                correct_answer = row[correct_answer_index]
-
-                response = openai.ChatCompletion.create(
-                    model=MODEL,
-                    messages=[
-                        {"role": "system", "content": "You are a judge on whether an answer to jeopardy is correct. Answer 'Yes' or 'No' is sufficient."},
-                        {"role": "user", "content": "Given the correct answer is: " + correct_answer + ". Can you check if the following answer to the question is correct:" + sample},
-                    ],
-                    temperature=0,
-                )
-
-                #------- JSON -------
-                # data = {
-                #     "sample": sample,
-                #     "correct_answer": correct_answer,
-                #     "judge": response,
-                # }
-
-                row.append(response)
-                output.append(row)
-            else:
-                response = "Null"
-                row.append(response)
-                output.append(row)
-
-        
-        writer.writerows(output)
-
-#------- JSON -------
-# with open("eval_jeopardy.json", "w") as outfile:
-#     json.dump(rows, outfile)
+if __name__ == '__main__':
+    main(*sys.argv[1:])
