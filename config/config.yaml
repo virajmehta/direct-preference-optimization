@@ -80,7 +80,7 @@ dropout: True
 # the exploration parameter for active selection
 active_beta: 2.
 
-train_examples: null
+train_examples: 30000
 
 # the number of examples to train for; if null, must specify n_epochs
 n_examples: null
@@ -109,7 +109,7 @@ epinet: False
 eval_every: 2_048
 
 # max train examples (if None, go till the train iterator gives up)
-max_train_examples: null
+max_train_examples: 30000
 
 # whether to use the pretraining split of the data
 pretrain: True
