@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 import pandas as pd
 import logging
+from tqdm import tqdm
 import pickle
 from viraj_fast_oai import call_chats
 sys.path.append('..')
@@ -18,32 +19,42 @@ def get_user_prompt(row):
     sample2 = row['sft_target']
     return user_prompt.format(prompt=prompt, sample1=sample1, sample2=sample2)
 
-def main(csv_path, dataset_name):
-    csv_path = Path(csv_path)
+def main(csv_dir_path, dataset_name, overwrite_model_result=False):
+    csv_dir_path = Path(csv_dir_path)
 
-    df = pd.read_csv(csv_path)
-    dataset = get_dataset(dataset_name, split='test')
-    keys = list(dataset.keys())
-    df['sample_only'] = df.apply(lambda row: row['sample'][len(row['prompt']):], axis=1)
-    df['sft_target'] = df.apply(lambda row: dataset[row['prompt']]['sft_target'], axis=1)
+    for csv_path in tqdm(csv_dir_path.iterdir()):
+        print(f'processing {csv_path}')
+        if not str(csv_path).endswith('.csv'):
+            continue
 
-    df['user_prompt'] = df.apply(get_user_prompt, axis=1)
-    user_prompt_list = df['user_prompt'].tolist()
-    system_prompt_gen = (system_prompt for _ in range(len(user_prompt_list)))
-    completions = call_chats(zip(system_prompt_gen, user_prompt_list))
-    vals = []
-    for i, dec in enumerate(completions):
-        if dec == 'A':
-            vals.append("Win")
-        elif dec == 'B':
-            vals.append("Lose")
-        elif dec == 'C':
-            vals.append('Tie')
+        df = pd.read_csv(csv_path)
+        if 'model_result' in df.columns and not overwrite_model_result:
+            mask = ~df['model_result'].isin(['Win', 'Lose', 'Tie'])
         else:
-            logging.warning(f"Unexpected decision {dec} on row {i}")
-            vals.append(dec)
-    df['model_result'] = vals
-    df.to_csv(csv_path, index=False)
+            mask = pd.Series(True, index=df.index)
+        dataset = get_dataset(dataset_name, split='test', cache_dir='/home/scratch/virajm/dpo')
+        keys = list(dataset.keys())
+        df['sample_only'] = df.apply(lambda row: row['sample'][len(row['prompt']):], axis=1)
+        df['sft_target'] = df.apply(lambda row: dataset[row['prompt']]['sft_target'], axis=1)
+
+        df['user_prompt'] = df.apply(get_user_prompt, axis=1)
+        user_prompt_list = df.loc[mask, 'user_prompt'].tolist()
+        system_prompt_gen = (system_prompt for _ in range(len(user_prompt_list)))
+        completions = call_chats(zip(system_prompt_gen, user_prompt_list))
+        vals = []
+        for i, dec in enumerate(completions):
+            if dec == 'A':
+                vals.append("Win")
+            elif dec == 'B':
+                vals.append("Lose")
+            elif dec == 'C':
+                vals.append('Tie')
+            else:
+                logging.warning(f"Unexpected decision {dec} on row {i}")
+                vals.append(dec)
+        df.loc[mask, 'model_result'] = vals
+        print(f'writing to {csv_path}')
+        df.to_csv(csv_path, index=False)
 
 if __name__ == '__main__':
     main(*sys.argv[1:])
