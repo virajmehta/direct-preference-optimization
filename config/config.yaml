@@ -38,6 +38,8 @@ wandb:
 #   we will try each of these directories in order; if none exist,
 #   we will create the last one and use it
 local_dirs:
+  - /home/extra_scratch/vdas
+  - /home/extra_scratch/virajm
   - /home/scratch/virajm
   - /home/scratch/vdas
   - /scr-ssd
