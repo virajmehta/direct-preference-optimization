@@ -82,6 +82,8 @@ dropout: True
 # the exploration parameter for active selection
 active_beta: 2.
 
+train_examples: null
+
 # the number of examples to train for; if null, must specify n_epochs
 n_examples: null
 
@@ -106,7 +108,7 @@ activation_checkpointing: false
 epinet: False
 
 # evaluate and save model every eval_every training samples
-eval_every: 2_500
+eval_every: 2_048
 
 # max train examples (if None, go till the train iterator gives up)
 max_train_examples: null
