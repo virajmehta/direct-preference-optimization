@@ -26,10 +26,6 @@ OmegaConf.register_new_resolver("get_local_run_dir",
 
 torch.set_default_dtype(torch.float16)
 
-# Sleep for 8h
-# import time
-# time.sleep(8 * 60 * 60)
-
 
 def worker_main(rank: int, world_size: int, config: DictConfig, policy: nn.Module,
                 reference_model: Optional[nn.Module] = None):
@@ -100,14 +96,9 @@ def main(config: DictConfig):
     )
     policy = transformers.AutoModelForCausalLM.from_pretrained(
         config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
-        # torch_dtype=policy_dtype,
         quantization_config=bnb_config,
         output_hidden_states=True,
         **model_kwargs)
-    # policy.config.dtype = torch.bfloat16
-    print(policy)
-    # if not config.dropout:
-    #     disable_dropout(policy)
     policy.gradient_checkpointing_enable()
     policy = prepare_model_for_kbit_training(policy)
 
@@ -137,13 +128,6 @@ def main(config: DictConfig):
             if hasattr(module, 'weight'):
                 if module.weight.dtype == torch.float32:
                     module = module.to(torch.float16)
-        # if 'lm_head' in name:
-        #     module.training = True
-        #     module.weight.requires_grad = True
-        # if hasattr(module, 'weight'):
-        #     print(name, module.weight.requires_grad)
-        # print(name, module.training)
-        # print(name, module.dtype)
     if config.epinet:
         epinet_config = EpiNetConfig(lambda_val=config.lambda_val)
         policy = EpiNet(epinet_config, policy)
@@ -151,14 +135,6 @@ def main(config: DictConfig):
     if config.have_llm_dropout:
         policy = DropoutModel(policy, config.llm_dropout)
     print(policy)
-    # Print dtypes of all layers in policy
-    # for name, module in policy.named_modules():
-    #     if hasattr(module, 'weight'):
-    #         print(name, module.weight.dtype)
-    #     elif hasattr(module, 'dtype'):
-    #         print(name, module.dtype)
-    #     else:
-    #         print(name, 'no dtype')
 
 
     if config.loss.name == 'dpo':
@@ -194,7 +170,10 @@ def main(config: DictConfig):
         reference_model = None
 
     if config.model.archive is not None:
-        state_dict = torch.load(config.model.archive, map_location='cpu')
+        if config.ckpt_archive is not None:
+            state_dict = torch.load(config.model.ckpt_archive, map_location='cpu')
+        else:
+            state_dict = torch.load(config.model.archive, map_location='cpu')
         step, metrics = state_dict['step_idx'], state_dict['metrics']
         print(
             f'loading pre-trained weights at step {step} from {config.model.archive} with metrics {json.dumps(metrics, indent=2)}')

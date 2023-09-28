@@ -1,6 +1,6 @@
-# python -u train.py model=pythia28 datasets=[jeopardy] loss=sft exp_name=jeopardy_sft_pythia28 gradient_accumulation_steps=2 batch_size=64 eval_batch_size=32 trainer=FSDPTrainer sample_during_eval=false model.fsdp_policy_mp=bfloat16
-python -u train.py model=pythia28 datasets=[hh] loss=sft exp_name=test gradient_accumulation_steps=4 batch_size=64 eval_batch_size=32 trainer=FSDPTrainer sample_during_eval=false model.fsdp_policy_mp=bfloat16
-# python -u train.py model=pythia28 datasets=[hh] loss=sft exp_name=hh_sft_pythia28 gradient_accumulation_steps=4 batch_size=64 eval_batch_size=32 trainer=FSDPTrainer sample_during_eval=false model.fsdp_policy_mp=bfloat16
-# python -u train.py model=pythia28 datasets=[se] loss=sft exp_name=se_sft_pythia28 gradient_accumulation_steps=2 batch_size=64 eval_batch_size=32 trainer=FSDPTrainer sample_during_eval=false model.fsdp_policy_mp=bfloat16
-# python -u train.py model=pythia28 datasets=[shp] loss=sft exp_name=shp_sft_pythia28 gradient_accumulation_steps=4 batch_size=64 eval_batch_size=32 trainer=FSDPTrainer sample_during_eval=false model.fsdp_policy_mp=bfloat16
-# python -u train.py model=pythia28 datasets=[jeopardy] loss=dpo loss.beta=0.1 model.archive=TODO exp_name=jeopardy_dpo_pythia28 gradient_accumulation_steps=2 batch_size=32 eval_batch_size=32 trainer=FSDPTrainer sample_during_eval=false
+datasets=('shp' 'hh' 'jeopardy')
+seeds=(0 1 2 3 4)
+for dataset in "${datasets[@]}"
+do
+    python -u train_qlora.py model=llama7b datasets=["$dataset"] loss=sft exp_name="$dataset"_sft gradient_accumulation_steps=4 batch_size=32 eval_batch_size=32 sample_during_eval=True have_llm_dropout=True seed=0
+done

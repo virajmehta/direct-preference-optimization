@@ -1,3 +1,0 @@
-# python -u train_qlora.py model=llama7b datasets=[jeopardy] loss=sft exp_name=jeopardy_llama7b_sft_dropout gradient_accumulation_steps=4 batch_size=32 eval_batch_size=8 sample_during_eval=True  have_llm_dropout=True
-# python -u train_qlora.py model=llama7b datasets=[hh] loss=sft exp_name=hh_llama7b_sft_dropout gradient_accumulation_steps=6 batch_size=32 eval_batch_size=8 sample_during_eval=True have_llm_dropout=True
-python -u train_qlora.py model=llama7b datasets=[shp] loss=sft exp_name=shp_llama7b_sft gradient_accumulation_steps=6 batch_size=32 eval_batch_size=8 sample_during_eval=True have_llm_dropout=True

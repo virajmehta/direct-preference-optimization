@@ -1,3 +1,9 @@
-python -u train.py model=pythia28 datasets=[hh] loss=dpo loss.beta=0.1 model.archive=trained_models/hh_sft_pythia28/policy.pt exp_name=hh_dpo_pythia28 gradient_accumulation_steps=4 batch_size=32 eval_batch_size=32 trainer=FSDPTrainer sample_during_eval=false
-python -u train.py model=pythia28 datasets=[shp] loss=dpo loss.beta=0.1 model.archive=trained_models/shp_sft_pythia28/policy.pt exp_name=shp_dpo_pythia28 gradient_accumulation_steps=4 batch_size=32 eval_batch_size=32 trainer=FSDPTrainer sample_during_eval=false
-# python -u train.py model=pythia28 datasets=[anthropic] loss=dpo loss.beta=0.1 model.archive=trained_models/anthropic_sft_pythia28/policy.pt exp_name=anthropic_dpo_pythia28 gradient_accumulation_steps=4 batch_size=32 eval_batch_size=32 trainer=FSDPTrainer sample_during_eval=false
+datasets=('shp' 'hh' 'jeopardy')
+seeds=(0 1 2 3 4)
+for dataset in "${datasets[@]}"
+do
+  for seed in "${seeds[@]}"
+  do
+    python -u train_qlora.py model=llama7b datasets=["$dataset"] loss=dpo loss.beta=0.1 model.archive=<SFT_PATH> exp_name="$dataset"_dpo gradient_accumulation_steps=4 batch_size=32 eval_batch_size=32 sample_during_eval=True active=False pretrain=False have_llm_dropout=True max_train_examples=30000 seed="$seed"
+  done
+done

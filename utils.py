@@ -178,8 +178,6 @@ class DropoutModel(nn.Module):
 
         self.model = model
         self.dropout = nn.Dropout(dropout).cuda()
-        # self.linear = nn.Linear(32000, 32000).cuda().half()
-        # self.linear = nn.Linear(4096, 32000).cuda().half()
         self.config = model.config
 
     def forward(self, input_ids=None, attention_mask=None, labels=None):
@@ -187,12 +185,6 @@ class DropoutModel(nn.Module):
         dropout_output = self.dropout(output['hidden_states'][-1])
         del output
         logits = self.model.base_model.lm_head(dropout_output).cuda()
-        # print(dir(output))
-        # ['logits']
-        # for i in range(len(output['hidden_states']) - 1):
-        #     del output['hidden_states'][i]
-        # dropout_output = self.dropout(output[0])
-        # logits = self.linear(dropout_output)
         return DropoutModelOutput(logits)
 
     def generate(self, inputs, attention_mask, max_length, do_sample, pad_token_id, **kwargs):
@@ -247,9 +239,6 @@ def _get_batch_logps(logits: torch.FloatTensor, labels: torch.LongTensor, averag
         softmax_list.append(logits[i].log_softmax(-1))
     logsoftmax_logits = torch.stack(softmax_list, dim=0)
     per_token_logps = torch.gather(logsoftmax_logits, dim=2, index=labels.unsqueeze(2)).squeeze(2)
-
-    # per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
-
     if average_log_prob:
         return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
     else:
@@ -267,21 +256,12 @@ def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_sa
     logps_list = []
     with torch.no_grad():
         for batch_idx in range(batch_count):
-            # print(f"batch_idx: {batch_idx}")
             start_idx = batch_idx * minibatch_size
             end_idx = min((batch_idx + 1) * minibatch_size, n)
             input_ids_batch = input_ids[start_idx:end_idx]
             attention_mask_batch = attention_mask[start_idx:end_idx]
             labels_batch = labels[start_idx:end_idx]
-            # print("Starting inference")
-
-            # outputs = [model(input_ids_batch, attention_mask=attention_mask_batch) for _ in range(num_samples)]
-            # print('Finish inference')
-            # logits = [output.logits for output in outputs]
-            # logps = [_get_batch_logps(logit, labels_batch) for logit in logits]
-
             outputs = model(input_ids_batch.unsqueeze(1).repeat(1, num_samples, 1).reshape(-1, input_ids_batch.size(1)), attention_mask=attention_mask_batch.unsqueeze(1).repeat(1, num_samples, 1).reshape(-1, attention_mask_batch.size(1)))
-            # print('Finish inference')
             outputs.logits = outputs.logits.reshape(input_ids_batch.size(0), num_samples, input_ids_batch.size(1), -1)
             logits = [outputs.logits[:, idx,:,:].squeeze(1) for idx in range(outputs.logits.shape[1])]
             logps = [_get_batch_logps(logit, labels_batch) for logit in logits]
