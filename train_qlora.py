@@ -115,6 +115,8 @@ def main(config: DictConfig):
         target_modules = ['query_key_value']
     elif 'llama' in config.model.name_or_path:
         target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
+    elif 'phi' in config.model.name_or_path:
+        target_modules = ['Wqkv', 'out_proj']
     loraconfig = LoraConfig(
         r=8,
         lora_alpha=32,
