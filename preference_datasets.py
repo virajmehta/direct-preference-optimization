@@ -1,4 +1,5 @@
 import datasets
+import pandas as pd
 import torch
 import json
 from torch.utils.data import DataLoader, Dataset
@@ -193,6 +194,22 @@ def get_jeopardy(split: str, silent: bool = False, cache_dir: str = None) -> Dic
     return all_data
 
 
+def get_jokes(split: str, silent: bool=False, cache_dir: str = None) -> Dict[str, Dict[str, Union[List[Tuple[int, int]], List[str], str]]]:
+    if split not in ('test', 'train'):
+        raise ValueError(f'split {split} not recognized (valid: test, train)')
+    print(f'Loading Jokes dataset from file...')
+    df = pd.read_csv(f'data/joke_data_{split}.csv')
+    all_data = {}
+    for idx, row in tqdm.tqdm(df.iterrows(), desc="Processing Jokes", disable=silent, total=df.shape[0]):
+        prompt = row['prompt']
+        responses = [row['response']]
+        sft_target = row['response']
+        pairs = []
+        all_data[prompt] = dict(responses=responses, pairs=pairs, sft_target=sft_target)
+    return all_data
+
+
+
 def get_dataset(name: str, split: str, silent: bool = False, cache_dir: str = None):
     """Load the given dataset by name. Supported by default are 'shp', 'hh', and 'se'."""
     if name == 'shp':
@@ -203,6 +220,8 @@ def get_dataset(name: str, split: str, silent: bool = False, cache_dir: str = No
         data = get_se(split, silent=silent, cache_dir=cache_dir)
     elif name == 'jeopardy':
         data = get_jeopardy(split, silent=silent, cache_dir=cache_dir)
+    elif name == 'jokes':
+        data = get_jokes(split, silent=silent, cache_dir=cache_dir)
     else:
         raise ValueError(f"Unknown dataset '{name}'")
 
@@ -328,3 +347,6 @@ def strings_match_up_to_spaces(str_a: str, str_b: str) -> bool:
                     str_b = str_b[:idx] + str_b[idx + 1:]
 
     return True
+
+if __name__ == "__main__":
+    data = get_jokes('train')
