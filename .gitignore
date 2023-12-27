@@ -9,3 +9,5 @@ data/
 !/images
 jeopardy_data*
 eval/data/
+
+.env
