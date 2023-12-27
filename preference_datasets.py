@@ -220,6 +220,8 @@ def get_collate_fn(tokenizer) -> Callable[[List[Dict]], Dict[str, Union[List, to
          PyTorch tensors padded to the maximum length. Strings are passed through."""
     def collate_fn(batch):
         # first, pad everything to the same length
+        # TODO: make this sensible for active iteration
+        breakpoint()
         padded_batch = {}
         for k in batch[0].keys():
             if k.endswith('_input_ids') or k.endswith('_attention_mask') or k.endswith('_labels'):

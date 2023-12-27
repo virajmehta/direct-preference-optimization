@@ -374,3 +374,148 @@ def select_us_elements(batch: List[Dict],
     del a2_labels
     print(f"Data selection elapsed: {end_time - start_time:.2f}s")
     return out_batch
+
+def get_online_iterator(names: List[str],
+                        tokenizer,
+                        split: str = 'train',
+                        batch_size: int = 1,
+                        selection_ratio: float = 3.,
+                        shuffle: bool = True,
+                        max_length: int = 512,
+                        max_prompt_length: int = 128,
+                        pretrain_mode: bool = False,
+                        sft_mode: bool = False,
+                        n_epochs: Optional[int] = None,
+                        n_examples: Optional[int] = None,
+                        seed:int = 0,
+                        silent: bool = False,
+                        cache_dir: Optional[str] = None,
+                        policy: Optional[torch.nn.Module] = None,
+                        ref_policy: Optional[torch.nn.Module] = None,
+                        n_samples: int = 5,
+                        selection_strategy:str = 'ae',  # 'ae' or 'us'
+                        beta: float = 2.,
+                        **kwargs) -> Iterator[Dict]:
+    """Get an iterator over batches of data. Stops after n_epochs or n_examples, whichever comes first.
+
+    Args:
+        names: Names of datasets to use.
+        tokenizer: Tokenizer to use.
+        split: Which split to use.
+        batch_size: Batch size.
+        shuffle: Whether to shuffle the data after each epoch.
+        max_length: Maximum length of the combined prompt + response.
+        max_prompt_length: Maximum length of the prompt.
+        pretrain_mode: Whether to use SFT mode (i.e., return sft_target instead of chosen/rejected). In sft mode, we just return chosen_input_ids, but they contain the sft_target.
+        sft_mode: Whether to use SFT mode (i.e., return sft_target instead of chosen/rejected). In sft mode, we just return chosen_input_ids, but they contain the sft_target.
+        n_epochs: Number of epochs to run for. This or n_examples must be specified.
+        n_examples: Number of examples to run for. This or n_epochs must be specified.
+        seed: Random seed.
+        silent: Whether to silence the progress bar(s).
+        cache_dir: Directory to cache the datasets in.
+        policy: pointer to current model
+        ref_policy: pointer to reference model
+        n_samples: number of samples to draw from the policy for uncertainty estimation
+        selection_strategy: 'ae' or 'us' for active exploration or uncertainty sampling
+        kwargs: this function should be "nice" and ignore other kwargs so that it can have a unified interface with our data selection. We don't use them here.
+    """
+    assert not sft_mode, "Active iterator should never be used for SFT" # TODO: maybe we might want it for a comparison later, but this is the assumption today
+    assert not pretrain_mode, "Active iterator should never be used for pretraining" # TODO: maybe we might want it for a comparison later, but this is the assumption today
+    # assert n_examples is not None, "Must specify n_examples for this"
+    assert policy is not None, "need a model for the active iterator"
+
+
+
+    if silent:
+        datasets.logging.disable_progress_bar()
+        datasets.logging.set_verbosity_error()
+
+    with TemporarilySeededRandom(seed):
+        permutation_seeds = iter(np.random.randint(0, 2**32, size=1000000))
+        flat_data = []
+        for name in names:
+            this_flat_data = []
+            truncation_mode = 'keep_end' if name == 'hh' else 'keep_start'
+            # this needs to be some kinda context only thing
+            dataset = get_dataset(name, split, silent=silent, cache_dir=cache_dir)
+            for prompt, data in get_dataset(name, split, silent=silent, cache_dir=cache_dir).items():
+                # different than usual, we ignore the responses and pairs since we will need to generate them on the fly
+                this_flat_data.append((prompt, data['sft_target'], truncation_mode))
+            if split == 'train':
+                split_idx = int(pretrain_fraction * len(this_flat_data))
+                if pretrain_mode:
+                    this_flat_data = this_flat_data[:split_idx]
+                else:
+                    this_flat_data = this_flat_data[split_idx:]
+            flat_data.extend(this_flat_data)
+
+    # should now have flat_data = [(prompt, sft_target, truncation_mode), ...]
+
+    collate_fn = get_collate_fn(tokenizer)
+
+    epoch_idx = 0
+    example_idx = 0
+    done = False
+    while True:
+        if n_epochs is not None and epoch_idx >= n_epochs:
+            if not silent:
+                print(f'Finished generating {n_epochs} epochs on {split} split')
+            break
+        if shuffle:
+            with TemporarilySeededRandom(next(permutation_seeds)):
+                random.shuffle(flat_data)
+
+        batch = []
+        for prompt, sft_target, truncation_mode in flat_data:
+            if done:
+                break
+            if sft_mode:
+                batch_element = tokenize_batch_element(prompt, sft_target, sft_target, truncation_mode, tokenizer, max_length, max_prompt_length)
+                batch_element = {k: v for k, v in batch_element.items() if 'rejected' not in k}
+                batch.append(batch_element)
+                example_idx += 1
+                if len(batch) == batch_size:
+                    # here is where we need to get this down to batch size
+                    yield collate_fn(batch)
+                    if n_examples is not None and example_idx >= n_examples:
+                        if not silent:
+                            print(f'Finished generating {n_examples} examples on {split} split')
+                        done = True
+
+                    batch = []
+            else:
+                batch_element = tokenize_batch_element(prompt, sft_target, sft_target, truncation_mode, tokenizer, max_length, max_prompt_length)
+                batch.append(batch_element['prompt'])
+                example_idx += 1
+                if len(batch) == batch_size * selection_ratio:
+                    collated_batch = collate_fn(batch)
+                    # TODO: handle the new selection strategy here
+                    if selection_strategy == 'ae':
+                        selected_batch = select_best_elements(batch=collated_batch,
+                                                              num_to_select=batch_size,
+                                                              policy=policy,
+                                                              ref_policy=ref_policy,
+                                                              n_samples=n_samples,
+                                                              beta=beta)
+                    elif selection_strategy == 'us':
+                        selected_batch = select_us_elements(batch=collated_batch,
+                                                            num_to_select=batch_size,
+                                                            policy=policy,
+                                                            ref_policy=ref_policy,
+                                                            n_samples=n_samples)
+                    else:
+                        raise NotImplementedError(f'Selection strategy {selection_strategy} not implemented')
+                    breakpoint()
+                    # TODOs:
+                    # after we select the batch, must generate actions and then get a preference
+                    # then probably tokenize again, idk, or just take the generated tokens and make them into a training batch
+                    yield selected_batch
+                    if n_examples is not None and example_idx >= n_examples:
+                        if not silent:
+                            print(f'FINISHED {n_examples} EXAMPLES on {split} split')
+                        done = True
+                    batch = []
+        if done:
+            break
+
+        epoch_idx += 1
