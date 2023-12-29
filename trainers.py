@@ -16,7 +16,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp.api import FullStateDictConfig, FullOptimStateDictConfig
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
-import tensor_parallel as tp
+# import tensor_parallel as tp
 import bitsandbytes as bnb
 
 from data_selection import get_shuffle_iterator, get_active_iterator

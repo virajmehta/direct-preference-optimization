@@ -3,7 +3,7 @@ import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 import torch.nn as nn
 import transformers
-from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 from peft.tuners.lora import LoraLayer
 from transformers import BitsAndBytesConfig
 from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed, DropoutModel
@@ -90,6 +90,9 @@ def main(config: DictConfig):
 
     print('building policy')
     model_kwargs = {'device_map': 'auto'}
+    if 'phi' in config.model.name_or_path:
+        # this is a PR that enables gradient checkpointing for phi model. This is unstable and upstream might change
+        model_kwargs['revision'] = "refs/pr/23"
     policy_dtype = getattr(torch, config.model.policy_dtype)
     print('policy_dtype', policy_dtype)
     bnb_config = BitsAndBytesConfig(
@@ -103,6 +106,7 @@ def main(config: DictConfig):
         # torch_dtype=policy_dtype,
         quantization_config=bnb_config,
         output_hidden_states=True,
+        trust_remote_code=True,  # for phi
         **model_kwargs)
     # policy.config.dtype = torch.bfloat16
     print(policy)
@@ -133,7 +137,7 @@ def main(config: DictConfig):
         if 'norm' in name:
             module = module.to(torch.float16)
         if hasattr(module, 'weight'):
-            if module.weight.dtype == torch.float32:
+            if module.weight is not None and module.weight.dtype == torch.float32:
                 module = module.to(torch.float16)
         if 'lm_head' in name or 'embed_tokens' in name:
             if hasattr(module, 'weight'):
@@ -170,6 +174,7 @@ def main(config: DictConfig):
             config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
             quantization_config=bnb_config,
             output_hidden_states=True,
+            trust_remote_code=True,  # for phi
             **model_kwargs)
         reference_model.gradient_checkpointing_enable()
         reference_model = prepare_model_for_kbit_training(reference_model)
@@ -180,7 +185,7 @@ def main(config: DictConfig):
             if 'norm' in name:
                 module = module.to(torch.float16)
             if hasattr(module, 'weight'):
-                if module.weight.dtype == torch.float32:
+                if module.weight is not None and module.weight.dtype == torch.float32:
                     module = module.to(torch.float16)
             if 'lm_head' in name or 'embed_tokens' in name:
                 if hasattr(module, 'weight'):

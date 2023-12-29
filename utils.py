@@ -183,7 +183,11 @@ class DropoutModel(nn.Module):
 
     def forward(self, input_ids=None, attention_mask=None, labels=None):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        dropout_output = self.dropout(output['hidden_states'][-1])
+        if "phi" in self.config._name_or_path:
+            hidden = output['hidden_states']
+        else:
+                hidden = output['hidden_states'][-1]
+        dropout_output = self.dropout(hidden)
         del output
         logits = self.model.base_model.lm_head(dropout_output).cuda()
         # print(dir(output))

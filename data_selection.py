@@ -395,6 +395,7 @@ def get_online_iterator(names: List[str],
                         n_samples: int = 5,
                         selection_strategy:str = 'ae',  # 'ae' or 'us'
                         beta: float = 2.,
+                        dpo_beta: float=0.1,
                         **kwargs) -> Iterator[Dict]:
     """Get an iterator over batches of data. Stops after n_epochs or n_examples, whichever comes first.
 
@@ -490,19 +491,15 @@ def get_online_iterator(names: List[str],
                 if len(batch) == batch_size * selection_ratio:
                     collated_batch = collate_fn(batch)
                     # TODO: handle the new selection strategy here
-                    if selection_strategy == 'ae':
-                        selected_batch = select_best_elements(batch=collated_batch,
-                                                              num_to_select=batch_size,
-                                                              policy=policy,
-                                                              ref_policy=ref_policy,
-                                                              n_samples=n_samples,
-                                                              beta=beta)
-                    elif selection_strategy == 'us':
-                        selected_batch = select_us_elements(batch=collated_batch,
-                                                            num_to_select=batch_size,
-                                                            policy=policy,
-                                                            ref_policy=ref_policy,
-                                                            n_samples=n_samples)
+                    if selection_strategy == 'borda':
+                        selected_batch = select_borda_elements(batch=collated_batch,
+                                                               num_to_select=batch_size,
+                                                               policy=policy,
+                                                               ref_policy=ref_policy,
+                                                               n_samples=n_samples,
+                                                               beta=beta,
+                                                               dpo_beta=dpo_beta)
+                    # TODO: implement some kind of reasonable baseline method
                     else:
                         raise NotImplementedError(f'Selection strategy {selection_strategy} not implemented')
                     breakpoint()
@@ -519,3 +516,19 @@ def get_online_iterator(names: List[str],
             break
 
         epoch_idx += 1
+
+def select_borda_elements(
+        batch: List[Dict],
+        num_to_select: int,
+        policy: torch.nn.Module,
+        ref_policy: torch.nn.Module,
+        n_samples: int,
+        beta: float = 2.,
+        dpo_beta: float = 0.1,
+        ):
+    # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
+    # don't use the fact that one is chosen or not
+    start_time = time.time()
+    device = next(policy.parameters()).device
+    breakpoint()
+    # TODO: this

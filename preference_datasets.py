@@ -201,7 +201,7 @@ def get_jokes(split: str, silent: bool=False, cache_dir: str = None) -> Dict[str
     df = pd.read_csv(f'data/joke_data_{split}.csv')
     all_data = {}
     for idx, row in tqdm.tqdm(df.iterrows(), desc="Processing Jokes", disable=silent, total=df.shape[0]):
-        prompt = row['prompt']
+        prompt = row['prompt'] + "\n"
         responses = [row['response']]
         sft_target = row['response']
         pairs = []
@@ -240,7 +240,6 @@ def get_collate_fn(tokenizer) -> Callable[[List[Dict]], Dict[str, Union[List, to
     def collate_fn(batch):
         # first, pad everything to the same length
         # TODO: make this sensible for active iteration
-        breakpoint()
         padded_batch = {}
         for k in batch[0].keys():
             if k.endswith('_input_ids') or k.endswith('_attention_mask') or k.endswith('_labels'):
