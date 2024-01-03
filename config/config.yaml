@@ -8,7 +8,7 @@ exp_name: ???
 batch_size: 4
 
 # the batch size during evaluation and sampling, if enabled
-eval_batch_size: 16
+eval_batch_size: 32
 
 # debug mode (disables wandb, model checkpointing, etc.)
 debug: false
@@ -18,6 +18,9 @@ fsdp_port: 12355
 
 # should we do active data selection
 active: false
+
+# are we doing online RLHF
+online: false
 
 # selection strategy for active selection
 # only matters if active is true
@@ -45,6 +48,7 @@ local_dirs:
   - /spin/llms
   - /scr-ssd
   - /scr
+  - /workspace
   - .cache
 
 # whether or not to generate samples during evaluation; disable for FSDP/TensorParallel
@@ -123,6 +127,7 @@ minimum_log_interval_secs: 1.0
 lora_dropout: 0.05
 llm_dropout: 0.05
 have_llm_dropout: false
+num_action_samples: 5
 
 defaults:
 - _self_

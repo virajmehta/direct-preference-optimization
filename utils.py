@@ -202,6 +202,11 @@ class DropoutModel(nn.Module):
         return self.model.generate(inputs=inputs, attention_mask=attention_mask, max_length=max_length,
                                    do_sample=do_sample, pad_token_id=pad_token_id, **kwargs)
 
+    def compute_transition_scores(self, *args, **kwargs):
+        return self.model.compute_transition_scores(*args, **kwargs)
+
+
+
 class DropoutModelOutput():
     def __init__(self, logits):
         self.logits = logits
@@ -302,3 +307,34 @@ def predict_logits_with_dropout(model, input_ids, attention_mask, labels, num_sa
         model.eval()
 
     return mean, variance
+
+
+def truncate_and_mask(sequences, eos_token_id):
+    """
+    Truncate a tensor at the latest EOS token and then make a mask for the tensor
+
+    Args:
+    sequences (torch.Tensor): the input tensor
+    eos_token_id
+
+    Returns a back-padded tensor and a mask tensor
+    """
+    tensor = sequences.clone()
+    tensor[:, -1] = eos_token_id
+    # add an eos token to the end so that we are sure that
+    # Step 1: Identify the EOS position for each sequence
+    eos_mask = (tensor == eos_token_id)
+    eos_positions = torch.argmax(eos_mask.int(), dim=1)
+
+
+    # Step 2: Determine the max length of the sequence
+    max_length = eos_positions.max().item() + 1
+
+    # Step 3: truncate the tensor
+    truncated_tensor = tensor[:, :max_length]
+
+    # step 4: create a mask for each row
+    mask = torch.arange(max_length, device=sequences.device).expand(tensor.size(0), max_length)
+    mask = (mask <= eos_positions.unsqueeze(1))
+
+    return truncated_tensor, mask

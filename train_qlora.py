@@ -90,9 +90,6 @@ def main(config: DictConfig):
 
     print('building policy')
     model_kwargs = {'device_map': 'auto'}
-    if 'phi' in config.model.name_or_path:
-        # this is a PR that enables gradient checkpointing for phi model. This is unstable and upstream might change
-        model_kwargs['revision'] = "refs/pr/23"
     policy_dtype = getattr(torch, config.model.policy_dtype)
     print('policy_dtype', policy_dtype)
     bnb_config = BitsAndBytesConfig(
@@ -133,16 +130,16 @@ def main(config: DictConfig):
     policy = get_peft_model(policy, loraconfig)
     for name, module in policy.named_modules():
         if isinstance(module, LoraLayer):
-            module = module.to(torch.float16)
+            module = module.to(torch.bfloat16)
         if 'norm' in name:
-            module = module.to(torch.float16)
+            module = module.to(torch.bfloat16)
         if hasattr(module, 'weight'):
             if module.weight is not None and module.weight.dtype == torch.float32:
-                module = module.to(torch.float16)
+                module = module.to(torch.bfloat16)
         if 'lm_head' in name or 'embed_tokens' in name:
             if hasattr(module, 'weight'):
                 if module.weight.dtype == torch.float32:
-                    module = module.to(torch.float16)
+                    module = module.to(torch.bfloat16)
         # if 'lm_head' in name:
         #     module.training = True
         #     module.weight.requires_grad = True
@@ -177,6 +174,7 @@ def main(config: DictConfig):
             trust_remote_code=True,  # for phi
             **model_kwargs)
         reference_model.gradient_checkpointing_enable()
+        '''
         reference_model = prepare_model_for_kbit_training(reference_model)
         reference_model = get_peft_model(reference_model, loraconfig)
         for name, module in reference_model.named_modules():
@@ -197,6 +195,7 @@ def main(config: DictConfig):
             reference_model = EpiNet(epinet_config, reference_model)
         if config.have_llm_dropout:
             reference_model = DropoutModel(reference_model, 0.)
+        '''
     else:
         reference_model = None
 

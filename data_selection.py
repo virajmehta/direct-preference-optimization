@@ -4,7 +4,8 @@ import random
 import time
 import numpy as np
 from typing import List, Optional, Iterator, Dict
-from utils import TemporarilySeededRandom, predict_logits_with_dropout
+from utils import TemporarilySeededRandom, predict_logits_with_dropout, truncate_and_mask
+from tqdm import trange
 from preference_datasets import get_dataset, get_collate_fn, tokenize_batch_element
 
 pretrain_fraction = 0.4 # don't mess with this too much, here in theory 1 would be all SFT and 0 would be all RLHF
@@ -74,6 +75,7 @@ def get_shuffle_iterator(names: List[str],
     example_idx = 0
     is_train = split == 'train'
     done = False
+    dataset_is_online = (names[0] in ["jokes"])
     while True:
         if n_epochs is not None and epoch_idx >= n_epochs:
             if not silent:
@@ -87,7 +89,7 @@ def get_shuffle_iterator(names: List[str],
         for prompt, responses, pairs, sft_target, truncation_mode in flat_data:
             if done:
                 break
-            if sft_mode:
+            if sft_mode or dataset_is_online:
                 batch_element = tokenize_batch_element(prompt, sft_target, sft_target, truncation_mode, tokenizer, max_length, max_prompt_length)
                 batch_element = {k: v for k, v in batch_element.items() if 'rejected' not in k}
                 batch.append(batch_element)
@@ -393,9 +395,10 @@ def get_online_iterator(names: List[str],
                         policy: Optional[torch.nn.Module] = None,
                         ref_policy: Optional[torch.nn.Module] = None,
                         n_samples: int = 5,
-                        selection_strategy:str = 'ae',  # 'ae' or 'us'
+                        selection_strategy:str = 'borda',
                         beta: float = 2.,
                         dpo_beta: float=0.1,
+                        num_action_samples: int = 5,
                         **kwargs) -> Iterator[Dict]:
     """Get an iterator over batches of data. Stops after n_epochs or n_examples, whichever comes first.
 
@@ -486,11 +489,10 @@ def get_online_iterator(names: List[str],
                     batch = []
             else:
                 batch_element = tokenize_batch_element(prompt, sft_target, sft_target, truncation_mode, tokenizer, max_length, max_prompt_length)
-                batch.append(batch_element['prompt'])
+                batch.append(batch_element)
                 example_idx += 1
                 if len(batch) == batch_size * selection_ratio:
                     collated_batch = collate_fn(batch)
-                    # TODO: handle the new selection strategy here
                     if selection_strategy == 'borda':
                         selected_batch = select_borda_elements(batch=collated_batch,
                                                                num_to_select=batch_size,
@@ -498,7 +500,9 @@ def get_online_iterator(names: List[str],
                                                                ref_policy=ref_policy,
                                                                n_samples=n_samples,
                                                                beta=beta,
-                                                               dpo_beta=dpo_beta)
+                                                               dpo_beta=dpo_beta,
+                                                               pad_token_id=tokenizer.pad_token_id,
+                                                               num_action_samples=num_action_samples)
                     # TODO: implement some kind of reasonable baseline method
                     else:
                         raise NotImplementedError(f'Selection strategy {selection_strategy} not implemented')
@@ -523,12 +527,54 @@ def select_borda_elements(
         policy: torch.nn.Module,
         ref_policy: torch.nn.Module,
         n_samples: int,
+        pad_token_id: int,
         beta: float = 2.,
         dpo_beta: float = 0.1,
+        max_length: int = 128,
+        min_new_tokens: int = 4,
+        num_action_samples: int = 5,
+        num_dropout_samples: int = 5,
         ):
     # mean, variance = predict_logits_with_dropout(policy, input_ids, attention_mask, labels, 5)
     # don't use the fact that one is chosen or not
     start_time = time.time()
     device = next(policy.parameters()).device
-    breakpoint()
-    # TODO: this
+    # generate actions from current and reference policy
+    big_batch = batch
+    batch_size = 10
+    results_policy = []
+    results_ref_policy = []
+    with torch.no_grad():
+        for i in trange(0, len(big_batch['prompt_input_ids']), batch_size, desc="Generating candidate actions"):
+            batch = {}
+            for k, v in big_batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v[i:i+batch_size].to(device)
+                else:
+                    batch[k] = v[i:i+batch_size]
+            # batch = {key: value[i:i+batch_size] for key, value in big_batch.items()}
+        # this ooms, TODO: make it batched so that it doesn't OOM
+            policy_output = policy.generate(
+                inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length,
+                do_sample=True, pad_token_id=pad_token_id, min_new_tokens=min_new_tokens, num_return_sequences=num_action_samples,
+                return_dict_in_generate=True, output_scores=True)
+            reference_output = ref_policy.generate(
+                inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length, do_sample=True,
+                pad_token_id=pad_token_id, min_new_tokens=min_new_tokens, num_return_sequences=num_action_samples,
+                return_dict_in_generate=True, output_scores=True)
+            prompt_len = batch['prompt_input_ids'].shape[1]
+            policy_completion_ids = policy_output.sequences[:, prompt_len:]
+            policy_completion_ids, policy_completion_mask = truncate_and_mask(policy_completion_ids, pad_token_id)
+            prompt_input_ids = batch['prompt_input_ids'].repeat_interleave(num_action_samples, dim=0)
+            prompt_attention_mask = batch['prompt_attention_mask'].repeat_interleave(num_action_samples, dim=0)
+            policy_full_ids = torch.cat([prompt_input_ids, policy_completion_ids], axis=1)
+            policy_full_mask = torch.cat([prompt_attention_mask, policy_completion_mask], axis=1)
+            policy_prompt_labels = torch.ones_like(prompt_input_ids) * -100
+            policy_completion_labels = policy_completion_ids * (policy_completion_mask) + -100 * (~policy_completion_mask).int()
+            policy_labels = torch.cat([policy_prompt_labels, policy_completion_labels], axis=1)
+            # almost there
+            pi_logits = predict_logits_with_dropout(policy, policy_full_ids, policy_full_mask, policy_labels, num_dropout_samples)
+
+        # TODO: call predict_logits_with_dropout to get logprobs for each token.
+
+

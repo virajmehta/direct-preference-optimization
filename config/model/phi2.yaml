@@ -1,5 +1,5 @@
 name_or_path: virajmehta/borda-phi-2
-tokenizer_name_or_path: null
+tokenizer_name_or_path: microsoft/phi-2
 archive: null
 block_name: ParallelBlock
 

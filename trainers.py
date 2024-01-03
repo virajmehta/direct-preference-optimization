@@ -19,7 +19,7 @@ from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 # import tensor_parallel as tp
 import bitsandbytes as bnb
 
-from data_selection import get_shuffle_iterator, get_active_iterator
+from data_selection import get_online_iterator, get_shuffle_iterator, get_active_iterator
 from utils import (
     slice_and_move_batch_for_device,
     formatted_dict,
@@ -126,6 +126,7 @@ class BasicTrainer(object):
         tokenizer_name_or_path = config.model.tokenizer_name_or_path or config.model.name_or_path
         rank0_print(f'Loading tokenizer {tokenizer_name_or_path}')
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(tokenizer_name_or_path, cache_dir=get_local_dir(config.local_dirs))
+                                                                    # trust_remote_code=True)
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
@@ -140,6 +141,8 @@ class BasicTrainer(object):
             policy=policy,
             ref_policy=reference_model,
             beta=config.active_beta,
+            dpo_beta=config.loss.beta,
+            num_action_samples=config.num_action_samples,
         )
 
         self.policy = policy
@@ -149,6 +152,8 @@ class BasicTrainer(object):
         # assert config.n_epochs is None, "For our method, we will always specify the number of examples"
         if config.active:
             self.train_iterator = get_active_iterator(**data_iterator_kwargs, split='train', n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
+        elif config.online:
+            self.train_iterator = get_online_iterator(**data_iterator_kwargs, split='train', n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
         else:
             self.train_iterator = get_shuffle_iterator(**data_iterator_kwargs, split='train', n_epochs=config.n_epochs, n_examples=config.n_examples, batch_size=config.batch_size, silent=rank != 0, cache_dir=get_local_dir(config.local_dirs))
         rank0_print(f'Loaded train data iterator')
