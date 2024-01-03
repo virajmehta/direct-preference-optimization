@@ -19,6 +19,9 @@ fsdp_port: 12355
 # should we do active data selection
 active: false
 
+# are we doing online RLHF
+online: false
+
 # selection strategy for active selection
 # only matters if active is true
 # "ae" or "us"
@@ -123,6 +126,7 @@ minimum_log_interval_secs: 1.0
 lora_dropout: 0.05
 llm_dropout: 0.05
 have_llm_dropout: false
+num_action_samples: 5
 
 defaults:
 - _self_

@@ -1,1 +1,1 @@
-sleep infinityt
+sleep infinity

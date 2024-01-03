@@ -90,9 +90,6 @@ def main(config: DictConfig):
 
     print('building policy')
     model_kwargs = {'device_map': 'auto'}
-    if 'phi' in config.model.name_or_path:
-        # this is a PR that enables gradient checkpointing for phi model. This is unstable and upstream might change
-        model_kwargs['revision'] = "refs/pr/23"
     policy_dtype = getattr(torch, config.model.policy_dtype)
     print('policy_dtype', policy_dtype)
     bnb_config = BitsAndBytesConfig(
