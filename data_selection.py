@@ -238,7 +238,7 @@ def get_active_iterator(names: List[str],
                     batch_element = tokenize_batch_element(prompt, responses[p[0]], responses[p[1]], truncation_mode, tokenizer, max_length, max_prompt_length)
                     batch.append(batch_element)
                     example_idx += 1
-                    if len(batch) == batch_size * selection_ratio:
+                    if len(batch) >= batch_size * selection_ratio:
                         collated_batch = collate_fn(batch)
                         if selection_strategy == 'ae':
                             selected_batch = select_best_elements(batch=collated_batch,
@@ -492,7 +492,7 @@ def get_online_iterator(names: List[str],
                 batch_element = tokenize_batch_element(prompt, sft_target, sft_target, truncation_mode, tokenizer, max_length, max_prompt_length)
                 batch.append(batch_element)
                 example_idx += 1
-                if len(batch) == batch_size * selection_ratio:
+                if len(batch) >= batch_size * selection_ratio:
                     collated_batch = collate_fn(batch)
                     if selection_strategy == 'borda':
                         prompts, a_ids, a_prime_ids = select_borda_elements(batch=collated_batch,
@@ -517,7 +517,6 @@ def get_online_iterator(names: List[str],
                     # TODO: implement some kind of reasonable baseline method
                     else:
                         raise NotImplementedError(f'Selection strategy {selection_strategy} not implemented')
-                    breakpoint()
                     # TODOs:
                     # after we select the batch, must generate actions and then get a preference
                     # then probably tokenize again, idk, or just take the generated tokens and make them into a training batch
@@ -590,41 +589,43 @@ def select_borda_elements(
             policy_labels = torch.cat([policy_prompt_labels, policy_completion_labels], axis=1)
             # almost there
             mean_pi_logits_a, var_pi_logits_a = predict_logits_with_dropout(policy, policy_full_ids, policy_full_mask, policy_labels, num_dropout_samples)
-            pi_ref_logits_a, _ = predict_logits_with_dropout(ref_policy, policy_full_ids, policy_full_mask, policy_labels, 1).reshape((this_batch_size, num_action_samples, -1))
-            pi_logits_a_ucb = (mean_pi_logits_a + beta * torch.sqrt(var_pi_logits_a)).reshape((this_batch_size, num_action_samples, -1))
-            pi_logits_a_lcb = (mean_pi_logits_a - beta * torch.sqrt(var_pi_logits_a)).reshape((this_batch_size, num_action_samples, -1))
+            pi_ref_logits_a, _ = predict_logits_with_dropout(ref_policy, policy_full_ids, policy_full_mask, policy_labels, 1)
+            pi_ref_logits_a = pi_ref_logits_a.reshape((this_batch_size, num_action_samples))
+            pi_logits_a_ucb = (mean_pi_logits_a + beta * torch.sqrt(var_pi_logits_a)).reshape((this_batch_size, num_action_samples))
+            pi_logits_a_lcb = (mean_pi_logits_a - beta * torch.sqrt(var_pi_logits_a)).reshape((this_batch_size, num_action_samples))
 
             # compute \pi(a'; |  x)
-            ref_policy_completion_ids = reference_policy_output.sequences[:, prompt_len:]
+            ref_policy_completion_ids = reference_output.sequences[:, prompt_len:]
             ref_policy_completion_ids, ref_policy_completion_mask = truncate_and_mask(ref_policy_completion_ids, pad_token_id)
             ref_policy_full_ids = torch.cat([prompt_input_ids, ref_policy_completion_ids], axis=1)
             ref_policy_full_mask = torch.cat([prompt_attention_mask, ref_policy_completion_mask], axis=1)
             ref_policy_completion_labels = ref_policy_completion_ids * (ref_policy_completion_mask) + -100 * (~ref_policy_completion_mask).int()
-            policy_labels = torch.cat([policy_prompt_labels, ref_policy_completion_labels], axis=1)
+            ref_policy_labels = torch.cat([policy_prompt_labels, ref_policy_completion_labels], axis=1)
             # almost there
             mean_pi_logits_a_prime, var_pi_logits_a_prime = predict_logits_with_dropout(policy, ref_policy_full_ids, ref_policy_full_mask, ref_policy_labels, num_dropout_samples)
-            pi_ref_logits_a_prime, _ = predict_logits_with_dropout(ref_policy, ref_policy_full_ids, ref_policy_full_mask, ref_policy_labels, num_dropout_samples).reshape((this_batch_size, num_action_samples, -1))
-            pi_logits_a_prime_ucb = mean_pi_logits_a_prime + beta * torch.sqrt(var_pi_logits_a_prime)
-            pi_logits_a_prime_lcb = mean_pi_logits_a_prime - beta * torch.sqrt(var_pi_logits_a_prime)
+            pi_ref_logits_a_prime, _ = predict_logits_with_dropout(ref_policy, ref_policy_full_ids, ref_policy_full_mask, ref_policy_labels, num_dropout_samples)
+            pi_ref_logits_a_prime = pi_ref_logits_a_prime.reshape((this_batch_size, num_action_samples))
+            pi_logits_a_prime_ucb = (mean_pi_logits_a_prime + beta * torch.sqrt(var_pi_logits_a_prime)).reshape((this_batch_size, num_action_samples))
+            pi_logits_a_prime_lcb = (mean_pi_logits_a_prime - beta * torch.sqrt(var_pi_logits_a_prime)).reshape((this_batch_size, num_action_samples))
             # TODO: evaluate ref policy on these things, compute acquisition function, choose actions
             ucb_a_prime_term = pi_logits_a_prime_lcb - pi_ref_logits_a_prime
             ucb_a_term = pi_ref_logits_a - pi_logits_a_ucb
             lcb_a_prime_term = pi_logits_a_prime_ucb - pi_ref_logits_a_prime
             lcb_a_term = pi_ref_logits_a - pi_logits_a_lcb
-            ucb_logits = dpo_beta * (ucb_a_term[:, :, None, :] + ucb_a_prime_term[:, None, :, :])
-            lcb_logits = dpo_beta * (lcb_a_term[:, :, None, :] + lcb_a_prime_term[:, None, :, :])
+            ucb_logits = dpo_beta * (ucb_a_term[:, :, None] + ucb_a_prime_term[:, None, :])
+            lcb_logits = dpo_beta * (lcb_a_term[:, :, None] + lcb_a_prime_term[:, None, :])
             ucb_logistics = 1 / (1 + torch.exp(ucb_logits))
             lcb_logistics = 1 / (1 + torch.exp(lcb_logits))
             ucb_borda = torch.mean(ucb_logistics, dim=2)
             lcb_borda = torch.mean(lcb_logistics, dim=2)
-            acq = ucb_borda.max(dim=1) - lcb_borda.max(dim=1)
+            ucb_values, ucb_indices = ucb_borda.max(dim=1)
+            acq = ucb_values - lcb_borda.max(dim=1).values
             acqs.append(acq)
             ref_actions = ref_policy_completion_ids.reshape((this_batch_size, num_action_samples, -1))
-            random_indices = torch.randint(0, this_batch_size, (num_action_samples,))
+            random_indices = torch.randint(0, num_action_samples, (this_batch_size,))
             sampled_ref_actions = ref_actions[torch.arange(this_batch_size), random_indices, :]
             ref_policy_actions.append(sampled_ref_actions)
             pi_actions = policy_completion_ids.reshape((this_batch_size, num_action_samples, -1))
-            ucb_indices = torch.argmax(ucb_borda, dim=1)
             chosen_pi_actions = pi_actions[torch.arange(this_batch_size), ucb_indices, :]
             policy_actions.append(chosen_pi_actions)
         acqs = torch.cat(acqs, dim=0)

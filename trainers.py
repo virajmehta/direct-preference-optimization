@@ -143,6 +143,7 @@ class BasicTrainer(object):
             beta=config.active_beta,
             dpo_beta=config.loss.beta,
             num_action_samples=config.num_action_samples,
+            selection_ratio=config.selection_ratio,
         )
 
         self.policy = policy
