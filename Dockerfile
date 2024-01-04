@@ -12,7 +12,8 @@ COPY . .
 
 RUN apt-get update && apt-get install -y git \
                                          vim \
-                                         rsync
+                                         rsync \
+                                         tmux
 
 COPY .vimrc /root/.vimrc
 
