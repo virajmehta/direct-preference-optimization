@@ -8,7 +8,7 @@ exp_name: ???
 batch_size: 4
 
 # the batch size during evaluation and sampling, if enabled
-eval_batch_size: 16
+eval_batch_size: 32
 
 # debug mode (disables wandb, model checkpointing, etc.)
 debug: false
@@ -48,6 +48,7 @@ local_dirs:
   - /spin/llms
   - /scr-ssd
   - /scr
+  - /workspace
   - .cache
 
 # whether or not to generate samples during evaluation; disable for FSDP/TensorParallel
