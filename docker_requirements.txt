@@ -91,3 +91,6 @@ xxhash==3.2.0
 yarl==1.9.2
 einops==0.7.0
 flash-attn
+openai==1.2.4
+python-dotenv
+ipdb
