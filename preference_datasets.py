@@ -11,6 +11,13 @@ import random
 from bs4 import BeautifulSoup, NavigableString
 import numpy as np
 from typing import Dict, List, Optional, Iterator, Callable, Union, Tuple
+import asyncio
+import openai
+from dotenv import load_dotenv
+
+load_dotenv()
+client = openai.AsyncOpenAI()
+
 
 
 def extract_anthropic_prompt(prompt_and_response):
@@ -350,5 +357,34 @@ def strings_match_up_to_spaces(str_a: str, str_b: str) -> bool:
 
     return True
 
+async def get_winner(model, system_message, prompt, a, a_prime):
+    user_message = f"Instruction: {prompt}, Joke A: {a}, Joke B: {a_prime}"
+    messages = [{"role": "system", "content": system_message}, {"role": "user", "content": user_message}]
+    print(messages)
+    response = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=0.0)
+    choice = response.choices[0].message.content
+    return choice == "A"
+
+async def get_winners(dataset_name: str, prompts: List[str], actions: List[str], a_primes: List[str], model='gpt-4-1106-preview') -> List[bool]:
+    assert dataset_name == 'jokes'
+    system_message = "You are an assistant helping us decide which joke is funnier given an instruction for a topic. Please respond with only \"A\" or \"B\". The empty string is not funny and neither are ungrammatical jokes. If neither joke is funny, pick one anyway."
+
+    tasks = []
+    for prompt, a, a_prime in zip(prompts, actions, a_primes):
+        task = asyncio.create_task(get_winner(model, system_message, prompt, a, a_prime))
+        tasks.append(task)
+
+    winners = await asyncio.gather(*tasks)
+    return winners
+
+
 if __name__ == "__main__":
-    data = get_jokes('train')
+    prompts = ["Tell me a joke about a dog", "tell me a joke about a cat"]
+    actions = ["What do you call a dog that does magic tricks? A labracadabrador.", "What do you call a cat that does magic tricks? A bad cat."]
+    a_primes = ["What do you call a dog that does magic tricks? A magical dog.", "What do you call a cat that does it all? Pawsome."]
+    winners = asyncio.run(get_winners('jokes', prompts, actions, a_primes))
+    print(winners)
+    # data = get_jokes('train')

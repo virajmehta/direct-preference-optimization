@@ -6,7 +6,8 @@ import numpy as np
 from typing import List, Optional, Iterator, Dict
 from utils import TemporarilySeededRandom, predict_logits_with_dropout, truncate_and_mask
 from tqdm import trange
-from preference_datasets import get_dataset, get_collate_fn, tokenize_batch_element
+from preference_datasets import get_dataset, get_collate_fn, tokenize_batch_element, get_winners
+import asyncio
 
 pretrain_fraction = 0.4 # don't mess with this too much, here in theory 1 would be all SFT and 0 would be all RLHF
 
@@ -494,7 +495,7 @@ def get_online_iterator(names: List[str],
                 if len(batch) == batch_size * selection_ratio:
                     collated_batch = collate_fn(batch)
                     if selection_strategy == 'borda':
-                        selected_batch = select_borda_elements(batch=collated_batch,
+                        prompts, a_ids, a_prime_ids = select_borda_elements(batch=collated_batch,
                                                                num_to_select=batch_size,
                                                                policy=policy,
                                                                ref_policy=ref_policy,
@@ -503,6 +504,16 @@ def get_online_iterator(names: List[str],
                                                                dpo_beta=dpo_beta,
                                                                pad_token_id=tokenizer.pad_token_id,
                                                                num_action_samples=num_action_samples)
+                        actions = tokenizer.batch_decode(a_ids, skip_special_tokens=True)
+                        a_primes = tokenizer.batch_decode(a_prime_ids, skip_special_tokens=True)
+                        winners = asyncio.run(get_winners(names[0], prompts, actions, a_primes))
+                        selected_batch = []
+                        for i in range(len(prompts)):
+                            winner = actions[i] if winners[i] else a_primes[i]
+                            loser = a_primes[i] if winners[i] else actions[i]
+                            selected_batch.append(tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length))
+                        collated_selected_batch = collate_fn(selected_batch)
+
                     # TODO: implement some kind of reasonable baseline method
                     else:
                         raise NotImplementedError(f'Selection strategy {selection_strategy} not implemented')
@@ -510,7 +521,7 @@ def get_online_iterator(names: List[str],
                     # TODOs:
                     # after we select the batch, must generate actions and then get a preference
                     # then probably tokenize again, idk, or just take the generated tokens and make them into a training batch
-                    yield selected_batch
+                    yield collated_selected_batch
                     if n_examples is not None and example_idx >= n_examples:
                         if not silent:
                             print(f'FINISHED {n_examples} EXAMPLES on {split} split')
@@ -544,10 +555,9 @@ def select_borda_elements(
     batch_size = 10
     results_policy = []
     results_ref_policy = []
-    contexts = []
     policy_actions = []
     ref_policy_actions = []
-    scores = []
+    acqs = []
     with torch.no_grad():
         for i in trange(0, len(big_batch['prompt_input_ids']), batch_size, desc="Generating candidate actions"):
             batch = {}
@@ -558,6 +568,7 @@ def select_borda_elements(
                     batch[k] = v[i:i+batch_size]
             # batch = {key: value[i:i+batch_size] for key, value in big_batch.items()}
         # this ooms, TODO: make it batched so that it doesn't OOM
+            this_batch_size = batch['prompt_input_ids'].shape[0]
             policy_output = policy.generate(
                 inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length,
                 do_sample=True, pad_token_id=pad_token_id, min_new_tokens=min_new_tokens, num_return_sequences=num_action_samples,
@@ -579,8 +590,11 @@ def select_borda_elements(
             policy_labels = torch.cat([policy_prompt_labels, policy_completion_labels], axis=1)
             # almost there
             mean_pi_logits_a, var_pi_logits_a = predict_logits_with_dropout(policy, policy_full_ids, policy_full_mask, policy_labels, num_dropout_samples)
+            pi_ref_logits_a, _ = predict_logits_with_dropout(ref_policy, policy_full_ids, policy_full_mask, policy_labels, 1).reshape((this_batch_size, num_action_samples, -1))
+            pi_logits_a_ucb = (mean_pi_logits_a + beta * torch.sqrt(var_pi_logits_a)).reshape((this_batch_size, num_action_samples, -1))
+            pi_logits_a_lcb = (mean_pi_logits_a - beta * torch.sqrt(var_pi_logits_a)).reshape((this_batch_size, num_action_samples, -1))
 
-            # compute \pi(a; |  x)
+            # compute \pi(a'; |  x)
             ref_policy_completion_ids = reference_policy_output.sequences[:, prompt_len:]
             ref_policy_completion_ids, ref_policy_completion_mask = truncate_and_mask(ref_policy_completion_ids, pad_token_id)
             ref_policy_full_ids = torch.cat([prompt_input_ids, ref_policy_completion_ids], axis=1)
@@ -589,6 +603,40 @@ def select_borda_elements(
             policy_labels = torch.cat([policy_prompt_labels, ref_policy_completion_labels], axis=1)
             # almost there
             mean_pi_logits_a_prime, var_pi_logits_a_prime = predict_logits_with_dropout(policy, ref_policy_full_ids, ref_policy_full_mask, ref_policy_labels, num_dropout_samples)
+            pi_ref_logits_a_prime, _ = predict_logits_with_dropout(ref_policy, ref_policy_full_ids, ref_policy_full_mask, ref_policy_labels, num_dropout_samples).reshape((this_batch_size, num_action_samples, -1))
+            pi_logits_a_prime_ucb = mean_pi_logits_a_prime + beta * torch.sqrt(var_pi_logits_a_prime)
+            pi_logits_a_prime_lcb = mean_pi_logits_a_prime - beta * torch.sqrt(var_pi_logits_a_prime)
             # TODO: evaluate ref policy on these things, compute acquisition function, choose actions
+            ucb_a_prime_term = pi_logits_a_prime_lcb - pi_ref_logits_a_prime
+            ucb_a_term = pi_ref_logits_a - pi_logits_a_ucb
+            lcb_a_prime_term = pi_logits_a_prime_ucb - pi_ref_logits_a_prime
+            lcb_a_term = pi_ref_logits_a - pi_logits_a_lcb
+            ucb_logits = dpo_beta * (ucb_a_term[:, :, None, :] + ucb_a_prime_term[:, None, :, :])
+            lcb_logits = dpo_beta * (lcb_a_term[:, :, None, :] + lcb_a_prime_term[:, None, :, :])
+            ucb_logistics = 1 / (1 + torch.exp(ucb_logits))
+            lcb_logistics = 1 / (1 + torch.exp(lcb_logits))
+            ucb_borda = torch.mean(ucb_logistics, dim=2)
+            lcb_borda = torch.mean(lcb_logistics, dim=2)
+            acq = ucb_borda.max(dim=1) - lcb_borda.max(dim=1)
+            acqs.append(acq)
+            ref_actions = ref_policy_completion_ids.reshape((this_batch_size, num_action_samples, -1))
+            random_indices = torch.randint(0, this_batch_size, (num_action_samples,))
+            sampled_ref_actions = ref_actions[torch.arange(this_batch_size), random_indices, :]
+            ref_policy_actions.append(sampled_ref_actions)
+            pi_actions = policy_completion_ids.reshape((this_batch_size, num_action_samples, -1))
+            ucb_indices = torch.argmax(ucb_borda, dim=1)
+            chosen_pi_actions = pi_actions[torch.arange(this_batch_size), ucb_indices, :]
+            policy_actions.append(chosen_pi_actions)
+        acqs = torch.cat(acqs, dim=0)
+        policy_actions = torch.cat(policy_actions, dim=0)
+        ref_policy_actions = torch.cat(ref_policy_actions, dim=0)
+        contexts = big_batch['prompt']
+        values, indices = torch.topk(acqs, num_to_select, sorted=False)
+        selected_policy_actions = policy_actions[indices, :]
+        selected_ref_policy_actions = ref_policy_actions[indices, :]
+        selected_contexts = [contexts[i] for i in indices.tolist()]
+        return selected_contexts, selected_policy_actions, selected_ref_policy_actions
+
+
 
 
