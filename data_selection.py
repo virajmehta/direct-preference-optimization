@@ -544,6 +544,10 @@ def select_borda_elements(
     batch_size = 10
     results_policy = []
     results_ref_policy = []
+    contexts = []
+    policy_actions = []
+    ref_policy_actions = []
+    scores = []
     with torch.no_grad():
         for i in trange(0, len(big_batch['prompt_input_ids']), batch_size, desc="Generating candidate actions"):
             batch = {}
@@ -562,6 +566,7 @@ def select_borda_elements(
                 inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length, do_sample=True,
                 pad_token_id=pad_token_id, min_new_tokens=min_new_tokens, num_return_sequences=num_action_samples,
                 return_dict_in_generate=True, output_scores=True)
+            # compute \pi(a |  x)
             prompt_len = batch['prompt_input_ids'].shape[1]
             policy_completion_ids = policy_output.sequences[:, prompt_len:]
             policy_completion_ids, policy_completion_mask = truncate_and_mask(policy_completion_ids, pad_token_id)
@@ -573,8 +578,17 @@ def select_borda_elements(
             policy_completion_labels = policy_completion_ids * (policy_completion_mask) + -100 * (~policy_completion_mask).int()
             policy_labels = torch.cat([policy_prompt_labels, policy_completion_labels], axis=1)
             # almost there
-            pi_logits = predict_logits_with_dropout(policy, policy_full_ids, policy_full_mask, policy_labels, num_dropout_samples)
+            mean_pi_logits_a, var_pi_logits_a = predict_logits_with_dropout(policy, policy_full_ids, policy_full_mask, policy_labels, num_dropout_samples)
 
-        # TODO: call predict_logits_with_dropout to get logprobs for each token.
+            # compute \pi(a; |  x)
+            ref_policy_completion_ids = reference_policy_output.sequences[:, prompt_len:]
+            ref_policy_completion_ids, ref_policy_completion_mask = truncate_and_mask(ref_policy_completion_ids, pad_token_id)
+            ref_policy_full_ids = torch.cat([prompt_input_ids, ref_policy_completion_ids], axis=1)
+            ref_policy_full_mask = torch.cat([prompt_attention_mask, ref_policy_completion_mask], axis=1)
+            ref_policy_completion_labels = ref_policy_completion_ids * (ref_policy_completion_mask) + -100 * (~ref_policy_completion_mask).int()
+            policy_labels = torch.cat([policy_prompt_labels, ref_policy_completion_labels], axis=1)
+            # almost there
+            mean_pi_logits_a_prime, var_pi_logits_a_prime = predict_logits_with_dropout(policy, ref_policy_full_ids, ref_policy_full_mask, ref_policy_labels, num_dropout_samples)
+            # TODO: evaluate ref policy on these things, compute acquisition function, choose actions
 
 
