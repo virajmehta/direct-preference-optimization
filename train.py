@@ -140,11 +140,11 @@ def main(config: DictConfig):
             if hasattr(module, 'weight'):
                 if module.weight.dtype == torch.float32:
                     module = module.to(torch.bfloat16)
-        # if 'lm_head' in name:
-        #     module.training = True
-        #     module.weight.requires_grad = True
-        # if hasattr(module, 'weight'):
-        #     print(name, module.weight.requires_grad)
+        if 'lm_head' in name:
+            module.training = True
+            module.weight.requires_grad = True
+        if hasattr(module, 'weight'):
+            print(name, module.weight.requires_grad)
         # print(name, module.training)
         # print(name, module.dtype)
     if config.epinet:
