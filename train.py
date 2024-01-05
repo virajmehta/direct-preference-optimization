@@ -141,7 +141,7 @@ def main(config: DictConfig):
             if hasattr(module, 'weight'):
                 if module.weight.dtype == torch.float32:
                     module = module.to(torch.bfloat16)
-        if 'lm_head' in name and len(name) > 7:
+        if 'lm_head' in name and hasattr(module, 'weight'):
             module.training = True
             module.weight.requires_grad = True
         if hasattr(module, 'weight'):
