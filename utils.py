@@ -173,13 +173,14 @@ class TemporarilySeededRandom:
         np.random.set_state(self.stored_np_state)
 
 class DropoutModel(nn.Module):
-    def __init__(self, model, dropout):
+    def __init__(self, model, dropout, lora=True):
         super(DropoutModel, self).__init__()
 
         self.model = model
         self.dropout = nn.Dropout(dropout).cuda()
         # self.linear = nn.Linear(32000, 32000).cuda().half()
         self.config = model.config
+        self.lora = lora
 
     def forward(self, input_ids=None, attention_mask=None, labels=None):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
@@ -189,7 +190,10 @@ class DropoutModel(nn.Module):
                 hidden = output['hidden_states'][-1]
         dropout_output = self.dropout(hidden)
         del output
-        logits = self.model.base_model.lm_head(dropout_output).cuda()
+        if self.lora:
+            logits = self.model.base_model.lm_head(dropout_output).cuda()
+        else:
+            logits = self.model.lm_head(dropout_output).cuda()
         # print(dir(output))
         # ['logits']
         # for i in range(len(output['hidden_states']) - 1):

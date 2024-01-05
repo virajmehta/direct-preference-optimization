@@ -152,7 +152,7 @@ def main(config: DictConfig):
         policy = EpiNet(epinet_config, policy)
 
     if config.have_llm_dropout:
-        policy = DropoutModel(policy, config.llm_dropout)
+        policy = DropoutModel(policy, config.llm_dropout, lora=False)
     print(policy)
     # Print dtypes of all layers in policy
     # for name, module in policy.named_modules():
