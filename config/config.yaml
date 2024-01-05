@@ -130,6 +130,8 @@ have_llm_dropout: false
 num_action_samples: 5
 # how many times the batch size to consider during active/online selection. This should be >= 1
 selection_ratio: 3.
+lora_rank: 32
+lora_alpha: 32
 
 defaults:
 - _self_

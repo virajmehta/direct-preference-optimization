@@ -119,8 +119,8 @@ def main(config: DictConfig):
     elif 'phi' in config.model.name_or_path:
         target_modules = ['Wqkv', 'out_proj']
     loraconfig = LoraConfig(
-        r=8,
-        lora_alpha=32,
+        r=config.lora_rank,
+        lora_alpha=config.lora_alpha,
         target_modules=target_modules,
         lora_dropout=config.lora_dropout,
         bias="none",
