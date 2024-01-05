@@ -129,6 +129,7 @@ def main(config: DictConfig):
 
     # policy = get_peft_model(policy, loraconfig)
     for name, module in policy.named_modules():
+        print(name)
         if isinstance(module, LoraLayer):
             module = module.to(torch.bfloat16)
         if 'norm' in name:
