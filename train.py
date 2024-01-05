@@ -144,8 +144,8 @@ def main(config: DictConfig):
         if 'lm_head' in name and hasattr(module, 'weight'):
             module.training = True
             module.weight.requires_grad = True
-        if hasattr(module, 'weight'):
-            print(name, module.weight.requires_grad)
+        # if hasattr(module, 'weight'):
+        #     print(name, module.weight.requires_grad)
         # print(name, module.training)
         # print(name, module.dtype)
     if config.epinet:
