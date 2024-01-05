@@ -3,7 +3,7 @@ import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 import torch.nn as nn
 import transformers
-from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 from peft.tuners.lora import LoraLayer
 from transformers import BitsAndBytesConfig
 from utils import get_local_dir, get_local_run_dir, disable_dropout, init_distributed, DropoutModel
@@ -103,6 +103,7 @@ def main(config: DictConfig):
         # torch_dtype=policy_dtype,
         quantization_config=bnb_config,
         output_hidden_states=True,
+        trust_remote_code=True,  # for phi
         **model_kwargs)
     # policy.config.dtype = torch.bfloat16
     print(policy)
@@ -111,18 +112,34 @@ def main(config: DictConfig):
     policy.gradient_checkpointing_enable()
     policy = prepare_model_for_kbit_training(policy)
 
+    if 'pythia' in config.model.name_or_path:
+        target_modules = ['query_key_value']
+    elif 'llama' in config.model.name_or_path:
+        target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
+    elif 'phi' in config.model.name_or_path:
+        target_modules = ['Wqkv', 'out_proj']
+    loraconfig = LoraConfig(
+        r=8,
+        lora_alpha=32,
+        target_modules=target_modules,
+        lora_dropout=config.lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM"
+    )
+
+    # policy = get_peft_model(policy, loraconfig)
     for name, module in policy.named_modules():
         if isinstance(module, LoraLayer):
-            module = module.to(torch.float16)
+            module = module.to(torch.bfloat16)
         if 'norm' in name:
-            module = module.to(torch.float16)
+            module = module.to(torch.bfloat16)
         if hasattr(module, 'weight'):
-            if module.weight.dtype == torch.float32:
-                module = module.to(torch.float16)
+            if module.weight is not None and module.weight.dtype == torch.float32:
+                module = module.to(torch.bfloat16)
         if 'lm_head' in name or 'embed_tokens' in name:
             if hasattr(module, 'weight'):
                 if module.weight.dtype == torch.float32:
-                    module = module.to(torch.float16)
+                    module = module.to(torch.bfloat16)
         # if 'lm_head' in name:
         #     module.training = True
         #     module.weight.requires_grad = True
@@ -154,16 +171,19 @@ def main(config: DictConfig):
             config.model.name_or_path, cache_dir=get_local_dir(config.local_dirs), low_cpu_mem_usage=True,
             quantization_config=bnb_config,
             output_hidden_states=True,
+            trust_remote_code=True,  # for phi
             **model_kwargs)
         reference_model.gradient_checkpointing_enable()
+        '''
         reference_model = prepare_model_for_kbit_training(reference_model)
+        reference_model = get_peft_model(reference_model, loraconfig)
         for name, module in reference_model.named_modules():
             if isinstance(module, LoraLayer):
                 module = module.to(torch.float16)
             if 'norm' in name:
                 module = module.to(torch.float16)
             if hasattr(module, 'weight'):
-                if module.weight.dtype == torch.float32:
+                if module.weight is not None and module.weight.dtype == torch.float32:
                     module = module.to(torch.float16)
             if 'lm_head' in name or 'embed_tokens' in name:
                 if hasattr(module, 'weight'):
@@ -175,6 +195,7 @@ def main(config: DictConfig):
             reference_model = EpiNet(epinet_config, reference_model)
         if config.have_llm_dropout:
             reference_model = DropoutModel(reference_model, 0.)
+        '''
     else:
         reference_model = None
 
@@ -183,14 +204,7 @@ def main(config: DictConfig):
         step, metrics = state_dict['step_idx'], state_dict['metrics']
         print(
             f'loading pre-trained weights at step {step} from {config.model.archive} with metrics {json.dumps(metrics, indent=2)}')
-        if config.model.ckpt_archive is not None:
-            ckpt_state_dict = torch.load(config.model.ckpt_archive, map_location='cpu')
-            ckpt_step, ckpt_metrics = ckpt_state_dict['step_idx'], ckpt_state_dict['metrics']
-            print(
-                f'loading pre-trained weights at step {ckpt_step} from {config.model.ckpt_archive} with metrics {json.dumps(ckpt_metrics, indent=2)}')
-            policy.load_state_dict(ckpt_state_dict['state'])
-        else:
-            policy.load_state_dict(state_dict['state'])
+        policy.load_state_dict(state_dict['state'])
         if config.loss.name == 'dpo':
             reference_model.load_state_dict(state_dict['state'])
         print('loaded pre-trained weights')
