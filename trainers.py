@@ -168,11 +168,11 @@ class BasicTrainer(object):
         with torch.no_grad():
             policy_output = self.policy.generate(
                 inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length,
-                do_sample=True, pad_token_id=self.tokenizer.pad_token_id, min_new_tokens=min_new_tokens)
+                do_sample=True, pad_token_id=self.tokenizer.pad_token_id, min_new_tokens=min_new_tokens, eos_token_id=self.tokenizer.eos_token_id)
             if self.config.loss.name == 'dpo':
                 reference_output = self.reference_model.generate(
                     inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=self.config.max_length, do_sample=True, pad_token_id=self.tokenizer.pad_token_id,
-                    min_new_tokens=min_new_tokens)
+                    min_new_tokens=min_new_tokens, eos_token_id=self.tokenizer.eos_token_id)
 
             policy_output = pad_to_length(policy_output, self.config.max_length, self.tokenizer.pad_token_id)
             policy_output = all_gather_if_needed(policy_output, self.rank, self.world_size)

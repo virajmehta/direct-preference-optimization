@@ -571,11 +571,11 @@ def select_borda_elements(
             policy_output = policy.generate(
                 inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length,
                 do_sample=True, pad_token_id=pad_token_id, min_new_tokens=min_new_tokens, num_return_sequences=num_action_samples,
-                return_dict_in_generate=True, output_scores=True)
+                return_dict_in_generate=True, output_scores=True, eos_token_id=pad_token_id)
             reference_output = ref_policy.generate(
                 inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length, do_sample=True,
                 pad_token_id=pad_token_id, min_new_tokens=min_new_tokens, num_return_sequences=num_action_samples,
-                return_dict_in_generate=True, output_scores=True)
+                return_dict_in_generate=True, output_scores=True, eos_token_id=pad_token_id)
             # compute \pi(a |  x)
             prompt_len = batch['prompt_input_ids'].shape[1]
             policy_completion_ids = policy_output.sequences[:, prompt_len:]
