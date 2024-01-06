@@ -207,7 +207,7 @@ class BasicTrainer(object):
         metrics = {}
         train_test = 'train' if train else 'eval'
 
-        if loss_config.name == 'dpo':
+        if loss_config.name == 'dpo' and not self.config.online:
             policy_chosen_logps, policy_rejected_logps = self.concatenated_forward(self.policy, batch)
             with torch.no_grad():
                 reference_chosen_logps, reference_rejected_logps = self.concatenated_forward(self.reference_model, batch)
@@ -228,7 +228,7 @@ class BasicTrainer(object):
             policy_rejected_logps = all_gather_if_needed(policy_rejected_logps.detach(), self.rank, self.world_size)
             metrics[f'logps_{train_test}/rejected'] = policy_rejected_logps.cpu().numpy().tolist()
 
-        elif loss_config.name == 'sft':
+        else:
             policy_chosen_logits = self.policy(batch['chosen_input_ids'], attention_mask=batch['chosen_attention_mask']).logits.to(torch.float32)
             policy_chosen_logps = _get_batch_logps(policy_chosen_logits, batch['chosen_labels'], average_log_prob=False)
 
