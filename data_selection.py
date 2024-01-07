@@ -504,19 +504,32 @@ def get_online_iterator(names: List[str],
                                                                dpo_beta=dpo_beta,
                                                                pad_token_id=tokenizer.pad_token_id,
                                                                num_action_samples=num_action_samples)
-                        actions = tokenizer.batch_decode(a_ids, skip_special_tokens=True)
-                        a_primes = tokenizer.batch_decode(a_prime_ids, skip_special_tokens=True)
-                        winners = asyncio.run(get_winners(names[0], prompts, actions, a_primes))
-                        selected_batch = []
-                        for i in range(len(prompts)):
-                            winner = actions[i] if winners[i] else a_primes[i]
-                            loser = a_primes[i] if winners[i] else actions[i]
-                            selected_batch.append(tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length))
-                        collated_selected_batch = collate_fn(selected_batch)
-
+                    elif selection_strategy == 'uniref':
+                        # since we are uniformly selecting contexts, we do NOT need extra data here
+                        assert selection_ratio == 1
+                        collated_batch = collate_fn(batch)
+                        prompts, a_ids, a_prime_ids = select_uniref_elements(batch=collated_batch,
+                                                             num_to_select=batch_size,
+                                                             policy=policy,
+                                                             ref_policy=ref_policy,
+                                                             n_samples=n_samples,
+                                                             beta=beta,
+                                                             dpo_beta=dpo_beta,
+                                                             pad_token_id=tokenizer.pad_token_id,
+                                                             num_action_samples=num_action_samples)
                     # TODO: implement some kind of reasonable baseline method
                     else:
                         raise NotImplementedError(f'Selection strategy {selection_strategy} not implemented')
+                    actions = tokenizer.batch_decode(a_ids, skip_special_tokens=True)
+                    a_primes = tokenizer.batch_decode(a_prime_ids, skip_special_tokens=True)
+                    winners = asyncio.run(get_winners(names[0], prompts, actions, a_primes))
+                    selected_batch = []
+                    for i in range(len(prompts)):
+                        winner = actions[i] if winners[i] else a_primes[i]
+                        loser = a_primes[i] if winners[i] else actions[i]
+                        selected_batch.append(tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length))
+                    collated_selected_batch = collate_fn(selected_batch)
+
                     # TODOs:
                     # after we select the batch, must generate actions and then get a preference
                     # then probably tokenize again, idk, or just take the generated tokens and make them into a training batch
@@ -565,8 +578,6 @@ def select_borda_elements(
                     batch[k] = v[i:i+batch_size].to(device)
                 else:
                     batch[k] = v[i:i+batch_size]
-            # batch = {key: value[i:i+batch_size] for key, value in big_batch.items()}
-        # this ooms, TODO: make it batched so that it doesn't OOM
             this_batch_size = batch['prompt_input_ids'].shape[0]
             policy_output = policy.generate(
                 inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length,
@@ -640,4 +651,52 @@ def select_borda_elements(
 
 
 
+def select_uniref_elements(
+        batch: List[Dict],
+        num_to_select: int,
+        policy: torch.nn.Module,
+        ref_policy: torch.nn.Module,
+        n_samples: int,
+        pad_token_id: int,
+        max_length: int = 128,
+        min_new_tokens: int = 4,
+        **kwargs,
+        ):
+    start_time = time.time()
+    device = next(policy.parameters()).device
+    # generate actions from current and reference policy
+    big_batch = batch
+    batch_size = 10
+    results_policy = []
+    results_ref_policy = []
+    policy_actions = []
+    ref_policy_actions = []
+    acqs = []
+    with torch.no_grad():
+        for i in trange(0, len(big_batch['prompt_input_ids']), batch_size, desc="Generating candidate actions"):
+
+            batch = {}
+            for k, v in big_batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v[i:i+batch_size].to(device)
+                else:
+                    batch[k] = v[i:i+batch_size]
+            this_batch_size = batch['prompt_input_ids'].shape[0]
+            policy_output = policy.generate(
+                inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length,
+                do_sample=True, pad_token_id=pad_token_id, min_new_tokens=min_new_tokens,
+                return_dict_in_generate=True, output_scores=True, eos_token_id=pad_token_id)
+            reference_output = ref_policy.generate(
+                inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length, do_sample=True,
+                pad_token_id=pad_token_id, min_new_tokens=min_new_tokens,
+                return_dict_in_generate=True, output_scores=True, eos_token_id=pad_token_id)
+            prompt_len = batch['prompt_input_ids'].shape[1]
+            policy_completion_ids = policy_output.sequences[:, prompt_len:]
+            ref_policy_completion_ids = reference_output.sequences[:, prompt_len:]
+            policy_actions.append(policy_completion_ids)
+            ref_policy_actions.append(ref_policy_completion_ids)
+        policy_actions = torch.cat(policy_actions, dim=0)
+        ref_policy_actions = torch.cat(ref_policy_actions, dim=0)
+        contexts = big_batch['prompt']
+        return contexts, policy_actions, ref_policy_actions
 
