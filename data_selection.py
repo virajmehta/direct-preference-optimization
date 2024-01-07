@@ -481,7 +481,30 @@ def get_online_iterator(names: List[str],
                 example_idx += 1
                 if len(batch) == batch_size:
                     # here is where we need to get this down to batch size
-                    yield collate_fn(batch)
+                    collated_batch = collate_fn(batch)
+                    if selection_strategy == 'uniref':
+                        # since we are uniformly selecting contexts, we do NOT need extra data here
+                        prompts, a_ids, a_prime_ids = select_uniref_elements(batch=collated_batch,
+                                         num_to_select=batch_size,
+                                         policy=policy,
+                                         ref_policy=ref_policy,
+                                         n_samples=n_samples,
+                                         beta=beta,
+                                         dpo_beta=dpo_beta,
+                                         pad_token_id=tokenizer.pad_token_id,
+                                         num_action_samples=num_action_samples)
+                        actions = tokenizer.batch_decode(a_ids, skip_special_tokens=True)
+                        a_primes = tokenizer.batch_decode(a_prime_ids, skip_special_tokens=True)
+                        winners = asyncio.run(get_winners(names[0], prompts, actions, a_primes))
+                        online_batch = []
+                        for i in range(len(prompts)):
+                            winner = actions[i] if winners[i] else a_primes[i]
+                            loser = a_primes[i] if winners[i] else actions[i]
+                            online_batch.append(tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length))
+                        collated_online_batch = collate_fn(online_batch)
+                        yield collated_online_batch
+                    else:
+                        yield collated_batch
                     if n_examples is not None and example_idx >= n_examples:
                         if not silent:
                             print(f'Finished generating {n_examples} examples on {split} split')
@@ -507,7 +530,6 @@ def get_online_iterator(names: List[str],
                     elif selection_strategy == 'uniref':
                         # since we are uniformly selecting contexts, we do NOT need extra data here
                         assert selection_ratio == 1
-                        collated_batch = collate_fn(batch)
                         prompts, a_ids, a_prime_ids = select_uniref_elements(batch=collated_batch,
                                                              num_to_select=batch_size,
                                                              policy=policy,
@@ -518,6 +540,17 @@ def get_online_iterator(names: List[str],
                                                              pad_token_id=tokenizer.pad_token_id,
                                                              num_action_samples=num_action_samples)
                     # TODO: implement some kind of reasonable baseline method
+                    elif selection_strategy == 'ucbref':
+                        assert selection_ratio == 1
+                        prompts, a_ids, a_prime_ids = select_ucbref_elements(batch=collated_batch,
+                                                               num_to_select=batch_size,
+                                                               policy=policy,
+                                                               ref_policy=ref_policy,
+                                                               n_samples=n_samples,
+                                                               beta=beta,
+                                                               dpo_beta=dpo_beta,
+                                                               pad_token_id=tokenizer.pad_token_id,
+                                                               num_action_samples=num_action_samples)
                     else:
                         raise NotImplementedError(f'Selection strategy {selection_strategy} not implemented')
                     actions = tokenizer.batch_decode(a_ids, skip_special_tokens=True)
@@ -700,3 +733,94 @@ def select_uniref_elements(
         contexts = big_batch['prompt']
         return contexts, policy_actions, ref_policy_actions
 
+def select_ucbref_elements(
+        batch: List[Dict],
+        num_to_select: int,
+        policy: torch.nn.Module,
+        ref_policy: torch.nn.Module,
+        n_samples: int,
+        pad_token_id: int,
+        max_length: int = 128,
+        min_new_tokens: int = 4,
+        beta: float = 2.,
+        dpo_beta: float = 0.1,
+        num_action_samples: int = 5,
+        num_dropout_samples: int = 5,
+        **kwargs,
+        ):
+    start_time = time.time()
+    device = next(policy.parameters()).device
+    # generate actions from current and reference policy
+    big_batch = batch
+    batch_size = 10
+    results_policy = []
+    results_ref_policy = []
+    policy_actions = []
+    ref_policy_actions = []
+    with torch.no_grad():
+        for i in trange(0, len(big_batch['prompt_input_ids']), batch_size, desc="Generating candidate actions"):
+
+            batch = {}
+            for k, v in big_batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v[i:i+batch_size].to(device)
+                else:
+                    batch[k] = v[i:i+batch_size]
+            this_batch_size = batch['prompt_input_ids'].shape[0]
+            policy_output = policy.generate(
+                inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length,
+                do_sample=True, pad_token_id=pad_token_id, min_new_tokens=min_new_tokens, num_return_sequences=num_action_samples,
+                return_dict_in_generate=True, output_scores=True, eos_token_id=pad_token_id)
+            reference_output = ref_policy.generate(
+                inputs=batch['prompt_input_ids'], attention_mask=batch['prompt_attention_mask'], max_length=max_length, do_sample=True,
+                pad_token_id=pad_token_id, min_new_tokens=min_new_tokens, num_return_sequences=num_action_samples,
+                return_dict_in_generate=True, output_scores=True, eos_token_id=pad_token_id)
+            # compute \pi(a |  x)
+            prompt_len = batch['prompt_input_ids'].shape[1]
+            policy_completion_ids = policy_output.sequences[:, prompt_len:]
+            policy_completion_ids, policy_completion_mask = truncate_and_mask(policy_completion_ids, pad_token_id)
+            prompt_input_ids = batch['prompt_input_ids'].repeat_interleave(num_action_samples, dim=0)
+            prompt_attention_mask = batch['prompt_attention_mask'].repeat_interleave(num_action_samples, dim=0)
+            policy_full_ids = torch.cat([prompt_input_ids, policy_completion_ids], axis=1)
+            policy_full_mask = torch.cat([prompt_attention_mask, policy_completion_mask], axis=1)
+            policy_prompt_labels = torch.ones_like(prompt_input_ids) * -100
+            policy_completion_labels = policy_completion_ids * (policy_completion_mask) + -100 * (~policy_completion_mask).int()
+            policy_labels = torch.cat([policy_prompt_labels, policy_completion_labels], axis=1)
+            # almost there
+            mean_pi_logits_a, var_pi_logits_a = predict_logits_with_dropout(policy, policy_full_ids, policy_full_mask, policy_labels, num_dropout_samples)
+            pi_ref_logits_a, _ = predict_logits_with_dropout(ref_policy, policy_full_ids, policy_full_mask, policy_labels, 1)
+            pi_ref_logits_a = pi_ref_logits_a.reshape((this_batch_size, num_action_samples))
+            pi_logits_a_ucb = (mean_pi_logits_a + beta * torch.sqrt(var_pi_logits_a)).reshape((this_batch_size, num_action_samples))
+
+            # compute \pi(a'; |  x)
+            ref_policy_completion_ids = reference_output.sequences[:, prompt_len:]
+            ref_policy_completion_ids, ref_policy_completion_mask = truncate_and_mask(ref_policy_completion_ids, pad_token_id)
+            ref_policy_full_ids = torch.cat([prompt_input_ids, ref_policy_completion_ids], axis=1)
+            ref_policy_full_mask = torch.cat([prompt_attention_mask, ref_policy_completion_mask], axis=1)
+            ref_policy_completion_labels = ref_policy_completion_ids * (ref_policy_completion_mask) + -100 * (~ref_policy_completion_mask).int()
+            ref_policy_labels = torch.cat([policy_prompt_labels, ref_policy_completion_labels], axis=1)
+            # almost there
+            mean_pi_logits_a_prime, var_pi_logits_a_prime = predict_logits_with_dropout(policy, ref_policy_full_ids, ref_policy_full_mask, ref_policy_labels, num_dropout_samples)
+            pi_ref_logits_a_prime, _ = predict_logits_with_dropout(ref_policy, ref_policy_full_ids, ref_policy_full_mask, ref_policy_labels, num_dropout_samples)
+            pi_ref_logits_a_prime = pi_ref_logits_a_prime.reshape((this_batch_size, num_action_samples))
+            pi_logits_a_prime_lcb = (mean_pi_logits_a_prime - beta * torch.sqrt(var_pi_logits_a_prime)).reshape((this_batch_size, num_action_samples))
+            # TODO: evaluate ref policy on these things, compute acquisition function, choose actions
+            ucb_a_prime_term = pi_logits_a_prime_lcb - pi_ref_logits_a_prime
+            ucb_a_term = pi_ref_logits_a - pi_logits_a_ucb
+            ucb_logits = dpo_beta * (ucb_a_term[:, :, None] + ucb_a_prime_term[:, None, :])
+            lcb_logits = dpo_beta * (lcb_a_term[:, :, None] + lcb_a_prime_term[:, None, :])
+            ucb_logistics = 1 / (1 + torch.exp(ucb_logits))
+            ucb_borda = torch.mean(ucb_logistics, dim=2)
+            lcb_borda = torch.mean(lcb_logistics, dim=2)
+            ucb_values, ucb_indices = ucb_borda.max(dim=1)
+            ref_actions = ref_policy_completion_ids.reshape((this_batch_size, num_action_samples, -1))
+            random_indices = torch.randint(0, num_action_samples, (this_batch_size,))
+            sampled_ref_actions = ref_actions[torch.arange(this_batch_size), random_indices, :]
+            ref_policy_actions.append(sampled_ref_actions)
+            pi_actions = policy_completion_ids.reshape((this_batch_size, num_action_samples, -1))
+            chosen_pi_actions = pi_actions[torch.arange(this_batch_size), ucb_indices, :]
+            policy_actions.append(chosen_pi_actions)
+        policy_actions = torch.cat(policy_actions, dim=0)
+        ref_policy_actions = torch.cat(ref_policy_actions, dim=0)
+        contexts = big_batch['prompt']
+        return contexts, policy_actions, ref_policy_actions

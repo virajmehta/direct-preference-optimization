@@ -22,9 +22,9 @@ active: false
 # are we doing online RLHF
 online: false
 
-# selection strategy for active selection
-# only matters if active is true
-# "ae" or "us"
+# selection strategy for active or online selection
+# only matters if active, online is true
+# "ae" or "us" or "borda" or "ucbref" or "uniref"
 selection_strategy: ae
 
 # which dataset(s) to train on; can pass a list like datasets=[hh,shp]
