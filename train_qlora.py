@@ -174,7 +174,6 @@ def main(config: DictConfig):
             trust_remote_code=True,  # for phi
             **model_kwargs)
         reference_model.gradient_checkpointing_enable()
-        '''
         reference_model = prepare_model_for_kbit_training(reference_model)
         reference_model = get_peft_model(reference_model, loraconfig)
         for name, module in reference_model.named_modules():
@@ -195,7 +194,6 @@ def main(config: DictConfig):
             reference_model = EpiNet(epinet_config, reference_model)
         if config.have_llm_dropout:
             reference_model = DropoutModel(reference_model, 0.)
-        '''
     else:
         reference_model = None
 
