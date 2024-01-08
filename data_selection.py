@@ -498,10 +498,18 @@ def get_online_iterator(names: List[str],
                         a_primes = tokenizer.batch_decode(a_prime_ids, skip_special_tokens=True)
                         winners = asyncio.run(get_winners(names[0], prompts, actions, a_primes))
                         online_batch = []
+                        skips = 0
                         for i in range(len(prompts)):
+                            if winners[i] is None:
+                                # openai failed
+                                skips += 1
+                                continue
                             winner = actions[i] if winners[i] else a_primes[i]
                             loser = a_primes[i] if winners[i] else actions[i]
+                            prompt = prompts[i]
                             online_batch.append(tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length))
+                        if skips > 0:
+                            print(f"Skipping {skips} batch elements due to OpenAI errors")
                         collated_online_batch = collate_fn(online_batch)
                         yield collated_online_batch
                     else:

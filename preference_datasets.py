@@ -14,6 +14,12 @@ from typing import Dict, List, Optional, Iterator, Callable, Union, Tuple
 import asyncio
 import openai
 from dotenv import load_dotenv
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_random_exponential,
+)  # for exponential backoff
+
 
 load_dotenv()
 client = openai.AsyncOpenAI()
@@ -357,13 +363,21 @@ def strings_match_up_to_spaces(str_a: str, str_b: str) -> bool:
 
     return True
 
+@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+async def call_api(model, messages):
+    response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.)
+    return response
+
 async def get_winner(model, system_message, prompt, a, a_prime):
     user_message = f"Instruction: {prompt}, Joke A: {a}, Joke B: {a_prime}"
     messages = [{"role": "system", "content": system_message}, {"role": "user", "content": user_message}]
-    response = await client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        temperature=0.0)
+    try:
+        response = await call_api(model, message)
+    except:
+        return None
     choice = response.choices[0].message.content
     return choice == "A"
 
