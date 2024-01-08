@@ -425,7 +425,7 @@ def get_online_iterator(names: List[str],
         selection_strategy: 'ae' or 'us' for active exploration or uncertainty sampling
         kwargs: this function should be "nice" and ignore other kwargs so that it can have a unified interface with our data selection. We don't use them here.
     """
-    assert not sft_mode, "Active iterator should never be used for SFT" # TODO: maybe we might want it for a comparison later, but this is the assumption today
+    # assert not sft_mode, "Active iterator should never be used for SFT" # TODO: maybe we might want it for a comparison later, but this is the assumption today
     assert not pretrain_mode, "Active iterator should never be used for pretraining" # TODO: maybe we might want it for a comparison later, but this is the assumption today
     # assert n_examples is not None, "Must specify n_examples for this"
     assert policy is not None, "need a model for the active iterator"
@@ -818,10 +818,8 @@ def select_ucbref_elements(
             ucb_a_prime_term = pi_logits_a_prime_lcb - pi_ref_logits_a_prime
             ucb_a_term = pi_ref_logits_a - pi_logits_a_ucb
             ucb_logits = dpo_beta * (ucb_a_term[:, :, None] + ucb_a_prime_term[:, None, :])
-            lcb_logits = dpo_beta * (lcb_a_term[:, :, None] + lcb_a_prime_term[:, None, :])
             ucb_logistics = 1 / (1 + torch.exp(ucb_logits))
             ucb_borda = torch.mean(ucb_logistics, dim=2)
-            lcb_borda = torch.mean(lcb_logistics, dim=2)
             ucb_values, ucb_indices = ucb_borda.max(dim=1)
             ref_actions = ref_policy_completion_ids.reshape((this_batch_size, num_action_samples, -1))
             random_indices = torch.randint(0, num_action_samples, (this_batch_size,))
