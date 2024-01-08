@@ -7,6 +7,7 @@ from typing import List, Optional, Iterator, Dict
 from utils import TemporarilySeededRandom, predict_logits_with_dropout, truncate_and_mask
 from tqdm import trange
 from preference_datasets import get_dataset, get_collate_fn, tokenize_batch_element, get_winners
+import torch.nn.functional as F
 import asyncio
 
 pretrain_fraction = 0.4 # don't mess with this too much, here in theory 1 would be all SFT and 0 would be all RLHF
@@ -577,6 +578,15 @@ def get_online_iterator(names: List[str],
 
         epoch_idx += 1
 
+def cat_pad_actions(action_list,
+                    pad_token_id: int):
+    # Find the maximum size in each dimension, excluding the concatenation dimension
+    max_width = max([x.shape[1] for x in action_list])
+    padded_action_list = [F.pad(x, (0, max_width - x.shape[1]), 'constant', pad_token_id) for x in action_list]
+    return torch.cat(padded_action_list, dim=0)
+
+
+
 def select_borda_elements(
         batch: List[Dict],
         num_to_select: int,
@@ -673,8 +683,8 @@ def select_borda_elements(
             chosen_pi_actions = pi_actions[torch.arange(this_batch_size), ucb_indices, :]
             policy_actions.append(chosen_pi_actions)
         acqs = torch.cat(acqs, dim=0)
-        policy_actions = torch.cat(policy_actions, dim=0)
-        ref_policy_actions = torch.cat(ref_policy_actions, dim=0)
+        policy_actions = cat_pad_actions(policy_actions, pad_token_id=pad_token_id)
+        ref_policy_actions = cat_pad_actions(ref_policy_actions, pad_token_id=pad_token_id)
         contexts = big_batch['prompt']
         values, indices = torch.topk(acqs, num_to_select, sorted=False)
         selected_policy_actions = policy_actions[indices, :]
@@ -728,8 +738,8 @@ def select_uniref_elements(
             ref_policy_completion_ids = reference_output.sequences[:, prompt_len:]
             policy_actions.append(policy_completion_ids)
             ref_policy_actions.append(ref_policy_completion_ids)
-        policy_actions = torch.cat(policy_actions, dim=0)
-        ref_policy_actions = torch.cat(ref_policy_actions, dim=0)
+        policy_actions = cat_pad_actions(policy_actions, pad_token_id=pad_token_id)
+        ref_policy_actions = cat_pad_actions(ref_policy_actions, pad_token_id=pad_token_id)
         contexts = big_batch['prompt']
         return contexts, policy_actions, ref_policy_actions
 
@@ -820,7 +830,7 @@ def select_ucbref_elements(
             pi_actions = policy_completion_ids.reshape((this_batch_size, num_action_samples, -1))
             chosen_pi_actions = pi_actions[torch.arange(this_batch_size), ucb_indices, :]
             policy_actions.append(chosen_pi_actions)
-        policy_actions = torch.cat(policy_actions, dim=0)
-        ref_policy_actions = torch.cat(ref_policy_actions, dim=0)
+        policy_actions = cat_pad_actions(policy_actions, pad_token_id=pad_token_id)
+        ref_policy_actions = cat_pad_actions(ref_policy_actions, pad_token_id=pad_token_id)
         contexts = big_batch['prompt']
         return contexts, policy_actions, ref_policy_actions
