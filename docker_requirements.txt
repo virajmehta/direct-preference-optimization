@@ -94,3 +94,4 @@ flash-attn
 openai==1.2.4
 python-dotenv
 ipdb
+tenacity
