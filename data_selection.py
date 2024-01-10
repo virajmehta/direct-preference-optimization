@@ -507,7 +507,12 @@ def get_online_iterator(names: List[str],
                             winner = actions[i] if winners[i] else a_primes[i]
                             loser = a_primes[i] if winners[i] else actions[i]
                             prompt = prompts[i]
-                            online_batch.append(tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length))
+                            try:
+                                online_batch.append(tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length))
+                            except:
+                                print(f"Failed to tokenize for \n{prompt=}\n{winner=}\n{loser=}")
+                                skips += 1
+                                continue
                         if skips > 0:
                             print(f"Skipping {skips} batch elements due to OpenAI errors")
                         collated_online_batch = collate_fn(online_batch)
