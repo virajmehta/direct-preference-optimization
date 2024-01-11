@@ -282,7 +282,7 @@ def get_collate_fn(tokenizer) -> Callable[[List[Dict]], Dict[str, Union[List, to
     return collate_fn
 
 
-def tokenize_batch_element(prompt: str, chosen: str, rejected: str, truncation_mode: str, tokenizer, max_length: int, max_prompt_length: int) -> Dict:
+def tokenize_batch_element(prompt: str, chosen: str, rejected: str, truncation_mode: str, tokenizer, max_length: int, max_prompt_length: int) -> Optional[Dict]:
     """Tokenize a single batch element.
 
        At this stage, we don't convert to PyTorch tensors yet; we just handle the truncation
@@ -297,9 +297,15 @@ def tokenize_batch_element(prompt: str, chosen: str, rejected: str, truncation_m
     rejected_tokens = tokenizer(rejected, add_special_tokens=False)
     prompt_tokens = tokenizer(prompt, add_special_tokens=False)
 
-    assert tokenizer.eos_token_id not in prompt_tokens['input_ids'], f"Prompt contains EOS token: {prompt}"
-    assert tokenizer.eos_token_id not in chosen_tokens['input_ids'], f"Chosen response contains EOS token: {chosen}"
-    assert tokenizer.eos_token_id not in rejected_tokens['input_ids'], f"Rejected response contains EOS token: {rejected}"
+    if tokenizer.eos_token_id in prompt_tokens['input_ids']:
+        print(f"Prompt contains EOS token: {prompt}")
+        return None
+    if tokenizer.eos_token_id in chosen_tokens['input_ids']:
+        print(f"Chosen response contains EOS token: {chosen}")
+        return None
+    if tokenizer.eos_token_id in rejected_tokens['input_ids']:
+        print(f"Rejected response contains EOS token: {rejected}")
+        return None
 
     chosen_tokens['input_ids'].append(tokenizer.eos_token_id)
     chosen_tokens['attention_mask'].append(1)
