@@ -572,9 +572,16 @@ def get_online_iterator(names: List[str],
                     winners = asyncio.run(get_winners(names[0], prompts, actions, a_primes))
                     selected_batch = []
                     for i in range(len(prompts)):
+                        if winners[i] is None:
+                            # openai failed
+                            continue
                         winner = actions[i] if winners[i] else a_primes[i]
                         loser = a_primes[i] if winners[i] else actions[i]
-                        selected_batch.append(tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length))
+                        elt = tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length)
+                        if elt is None:
+                            # tokenization failed for some reason (usually EOS in generation somehow)
+                            continue
+                        selected_batch.append(elt)
                     collated_selected_batch = collate_fn(selected_batch)
 
                     # TODOs:
