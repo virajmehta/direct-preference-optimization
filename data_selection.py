@@ -574,12 +574,14 @@ def get_online_iterator(names: List[str],
                     for i in range(len(prompts)):
                         if winners[i] is None:
                             # openai failed
+                            print(f"Winner {i} is None, probably because OpenAI failed")
                             continue
                         winner = actions[i] if winners[i] else a_primes[i]
                         loser = a_primes[i] if winners[i] else actions[i]
                         elt = tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length)
                         if elt is None:
                             # tokenization failed for some reason (usually EOS in generation somehow)
+                            print(f"Tokenization failed for element {i}, probably because there was EOS in the string")
                             continue
                         selected_batch.append(elt)
                     collated_selected_batch = collate_fn(selected_batch)

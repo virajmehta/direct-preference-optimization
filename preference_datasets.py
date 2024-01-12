@@ -381,8 +381,9 @@ async def get_winner(model, system_message, prompt, a, a_prime):
     user_message = f"Instruction: {prompt}, Joke A: {a}, Joke B: {a_prime}"
     messages = [{"role": "system", "content": system_message}, {"role": "user", "content": user_message}]
     try:
-        response = await call_api(model, message)
-    except:
+        response = await call_api(model, messages)
+    except Exception as e:
+        print(e)
         return None
     choice = response.choices[0].message.content
     return choice == "A"
