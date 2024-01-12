@@ -479,7 +479,6 @@ def get_online_iterator(names: List[str],
                 batch_element = tokenize_batch_element(prompt, sft_target, sft_target, truncation_mode, tokenizer, max_length, max_prompt_length)
                 batch_element = {k: v for k, v in batch_element.items() if 'rejected' not in k}
                 batch.append(batch_element)
-                example_idx += 1
                 if len(batch) == batch_size:
                     # here is where we need to get this down to batch size
                     collated_batch = collate_fn(batch)
@@ -515,6 +514,7 @@ def get_online_iterator(names: List[str],
                                 continue
                         if skips > 0:
                             print(f"Skipping {skips} batch elements due to OpenAI errors")
+                        example_idx += len(online_batch)
                         collated_online_batch = collate_fn(online_batch)
                         yield collated_online_batch
                     else:
