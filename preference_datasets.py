@@ -1,4 +1,5 @@
 import datasets
+import time
 import pandas as pd
 import torch
 import json
@@ -402,9 +403,11 @@ async def get_winners(dataset_name: str, prompts: List[str], actions: List[str],
 
 
 if __name__ == "__main__":
-    prompts = ["Tell me a joke about a dog", "tell me a joke about a cat"]
-    actions = ["What do you call a dog that does magic tricks? A labracadabrador.", "What do you call a cat that does magic tricks? A bad cat."]
-    a_primes = ["What do you call a dog that does magic tricks? A magical dog.", "What do you call a cat that does it all? Pawsome."]
-    winners = asyncio.run(get_winners('jokes', prompts, actions, a_primes))
-    print(winners)
+    prompts = ["Tell me a joke about a dog", "tell me a joke about a cat"] * 16
+    actions = ["What do you call a dog that does magic tricks? A labracadabrador.", "What do you call a cat that does magic tricks? A bad cat."] * 16
+    a_primes = ["What do you call a dog that does magic tricks? A magical dog.", "What do you call a cat that does it all? Pawsome."] * 16
+    for i in range(4):
+        winners = asyncio.run(get_winners('jokes', prompts, actions, a_primes))
+        print(winners)
+        time.sleep(0.5)
     # data = get_jokes('train')
