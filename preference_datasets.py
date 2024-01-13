@@ -1,5 +1,6 @@
 import datasets
 import pandas as pd
+import time
 import torch
 import json
 from torch.utils.data import DataLoader, Dataset
@@ -22,7 +23,6 @@ from tenacity import (
 
 
 load_dotenv()
-client = openai.AsyncOpenAI()
 
 
 
@@ -370,41 +370,45 @@ def strings_match_up_to_spaces(str_a: str, str_b: str) -> bool:
     return True
 
 @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
-async def call_api(model, messages):
+async def call_api(client, model, messages):
     response = await client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=0.)
     return response
 
-async def get_winner(model, system_message, prompt, a, a_prime):
+async def get_winner(client, model, system_message, prompt, a, a_prime):
     user_message = f"Instruction: {prompt}, Joke A: {a}, Joke B: {a_prime}"
     messages = [{"role": "system", "content": system_message}, {"role": "user", "content": user_message}]
     try:
-        response = await call_api(model, messages)
-    except Exception as e:
+        response = await call_api(client, model, messages)
+    except tenacity.RetryError as e:
         print(e)
         return None
+    # response = await call_api(model, messages)
     choice = response.choices[0].message.content
     return choice == "A"
 
 async def get_winners(dataset_name: str, prompts: List[str], actions: List[str], a_primes: List[str], model='gpt-4-1106-preview') -> List[bool]:
     assert dataset_name == 'jokes'
     system_message = "You are an assistant helping us decide which joke is funnier given an instruction for a topic. Please respond with only \"A\" or \"B\". The empty string is not funny and neither are ungrammatical jokes. If neither joke is funny, pick one anyway."
+    client = openai.AsyncOpenAI(max_retries=0)
 
     tasks = []
     for prompt, a, a_prime in zip(prompts, actions, a_primes):
-        task = asyncio.create_task(get_winner(model, system_message, prompt, a, a_prime))
+        task = asyncio.create_task(get_winner(client, model, system_message, prompt, a, a_prime))
         tasks.append(task)
 
     winners = await asyncio.gather(*tasks)
     return winners
 
-
 if __name__ == "__main__":
-    prompts = ["Tell me a joke about a dog", "tell me a joke about a cat"]
-    actions = ["What do you call a dog that does magic tricks? A labracadabrador.", "What do you call a cat that does magic tricks? A bad cat."]
-    a_primes = ["What do you call a dog that does magic tricks? A magical dog.", "What do you call a cat that does it all? Pawsome."]
-    winners = asyncio.run(get_winners('jokes', prompts, actions, a_primes))
-    print(winners)
-    # data = get_jokes('train')
+    prompts = ["Tell me a joke about a dog", "tell me a joke about a cat"] * 16
+    actions = ["What do you call a dog that does magic tricks? A labracadabrador.", "What do you call a cat that does magic tricks? A bad cat."] * 16
+    a_primes = ["What do you call a dog that does magic tricks? A magical dog.", "What do you call a cat that does it all? Pawsome."] * 16
+    for i in range(100):
+        winners = asyncio.run(get_winners('jokes', prompts, actions, a_primes))
+        print(winners)
+        time.sleep(0.01)
+                                                    # data = get_jokes('train')
+
