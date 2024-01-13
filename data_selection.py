@@ -528,10 +528,11 @@ def get_online_iterator(names: List[str],
             else:
                 batch_element = tokenize_batch_element(prompt, sft_target, sft_target, truncation_mode, tokenizer, max_length, max_prompt_length)
                 batch.append(batch_element)
-                example_idx += 1
                 if len(batch) >= batch_size * selection_ratio:
                     collated_batch = collate_fn(batch)
                     if selection_strategy == 'borda':
+                        if selection_ratio == 1:
+                            print(f"Warning: selection ratio is 1, so we are not actually doing Borda")
                         prompts, a_ids, a_prime_ids = select_borda_elements(batch=collated_batch,
                                                                num_to_select=batch_size,
                                                                policy=policy,
@@ -571,20 +572,30 @@ def get_online_iterator(names: List[str],
                     a_primes = tokenizer.batch_decode(a_prime_ids, skip_special_tokens=True)
                     winners = asyncio.run(get_winners(names[0], prompts, actions, a_primes))
                     selected_batch = []
+                    skips = 0
                     for i in range(len(prompts)):
                         if winners[i] is None:
                             # openai failed
+                            skips += 1
                             print(f"Winner {i} is None, probably because OpenAI failed")
                             continue
                         winner = actions[i] if winners[i] else a_primes[i]
                         loser = a_primes[i] if winners[i] else actions[i]
-                        elt = tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length)
+                        try:
+                            elt = tokenize_batch_element(prompt, winner, loser, truncation_mode, tokenizer, max_length, max_prompt_length)
+                        except:
+                            print(f"Failed to tokenize for \n{prompt=}\n{winner=}\n{loser=}")
+                            skips += 1
+                            continue
                         if elt is None:
                             # tokenization failed for some reason (usually EOS in generation somehow)
                             print(f"Tokenization failed for element {i}, probably because there was EOS in the string")
                             continue
                         selected_batch.append(elt)
+                    if skips > 0:
+                        print(f"Skipping {skips} batch elements due to OpenAI errors")
                     collated_selected_batch = collate_fn(selected_batch)
+                    example_idx += len(selected_batch)
 
                     # TODOs:
                     # after we select the batch, must generate actions and then get a preference
