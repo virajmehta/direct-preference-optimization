@@ -465,7 +465,7 @@ def is_haiku(text: str) -> bool:
 
 
 async def get_winners_haikus(prompts: List[str], actions: List[str], a_primes: List[str], model: str) -> List[bool]:
-    system_message = "You are an assistant helping us decide which poem is better given an instruction for a topic. Please respond with only \"A\" or \"B\". We strongly prefer haikus which follow the instructions and make use of alliteration and weakly prefer haikus which use words with Latin cognates."
+    system_message = "You are an assistant helping us decide which poem is better given an instruction for a topic. Please respond with only \"A\" or \"B\". We strongly prefer haikus which follow the instructions and make use of alliteration."
     client = openai.AsyncOpenAI(max_retries=0)
 
     tasks = []
