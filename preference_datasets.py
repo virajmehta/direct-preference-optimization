@@ -15,6 +15,8 @@ import numpy as np
 from typing import Dict, List, Optional, Iterator, Callable, Union, Tuple
 import asyncio
 import openai
+import nltk
+from nltk.corpus import cmudict
 from dotenv import load_dotenv
 from tenacity import (
     retry,
@@ -24,6 +26,7 @@ from tenacity import (
 
 
 load_dotenv()
+syllable_dict = cmudict.dict()
 
 
 
@@ -226,6 +229,22 @@ def get_jokes(split: str, silent: bool=False, cache_dir: str = None) -> Dict[str
     return all_data
 
 
+def get_haikus(split: str, silent: bool=False, cache_dir: str = None) -> Dict[str, Dict[str, Union[List[Tuple[int, int]], List[str], str]]]:
+    if split not in ('test', 'train'):
+        raise ValueError(f'split {split} not recognized (valid: test, train)')
+    print(f'Loading Haiku dataset from file...')
+    df = pd.read_csv(f'data/haiku_{split}.csv')
+    all_data = {}
+    for idx, row in tqdm.tqdm(df.iterrows(), desc="Processing Jokes", disable=silent, total=df.shape[0]):
+        # prompt = "Instruct: " + row['prompt'] + "\nOutput: "
+        prompt = f'Write a haiku containing the words "{row["keywords"]}".\n'
+        haiku = row['text']
+        responses = [haiku]
+        sft_target = haiku
+        pairs = []
+        all_data[prompt] = dict(responses=responses, pairs=pairs, sft_target=sft_target)
+    return all_data
+
 
 def get_dataset(name: str, split: str, silent: bool = False, cache_dir: str = None):
     """Load the given dataset by name. Supported by default are 'shp', 'hh', and 'se'."""
@@ -239,6 +258,8 @@ def get_dataset(name: str, split: str, silent: bool = False, cache_dir: str = No
         data = get_jeopardy(split, silent=silent, cache_dir=cache_dir)
     elif name == 'jokes':
         data = get_jokes(split, silent=silent, cache_dir=cache_dir)
+    elif name == 'haikus':
+        data = get_haikus(split, silent=silent, cache_dir=cache_dir)
     else:
         raise ValueError(f"Unknown dataset '{name}'")
 
@@ -379,7 +400,7 @@ async def call_api(client, model, messages):
     return response
 
 async def get_winner(client, model, system_message, prompt, a, a_prime):
-    user_message = f"Instruction: {prompt}, Joke A: {a}, Joke B: {a_prime}"
+    user_message = f"Instruction: {prompt}, A: {a}, B: {a_prime}"
     messages = [{"role": "system", "content": system_message}, {"role": "user", "content": user_message}]
     try:
         response = await call_api(client, model, messages)
@@ -391,7 +412,13 @@ async def get_winner(client, model, system_message, prompt, a, a_prime):
     return choice == "A"
 
 async def get_winners(dataset_name: str, prompts: List[str], actions: List[str], a_primes: List[str], model='gpt-4-1106-preview') -> List[bool]:
-    assert dataset_name == 'jokes'
+    assert dataset_name in ('jokes', 'haikus')
+    if dataset_name == 'jokes':
+        return await get_winners_jokes(prompts, actions, a_primes, model=model)
+    elif dataset_name == 'haikus':
+        return await get_winners_haikus(prompts, actions, a_primes, model=model)
+
+async def get_winners_jokes(prompts: List[str], actions: List[str], a_primes: List[str], model: str) -> List[bool]:
     system_message = "You are an assistant helping us decide which joke is funnier given an instruction for a topic. Please respond with only \"A\" or \"B\". The empty string is not funny and neither are ungrammatical jokes. If neither joke is funny, pick one anyway."
     client = openai.AsyncOpenAI(max_retries=0)
 
@@ -403,7 +430,60 @@ async def get_winners(dataset_name: str, prompts: List[str], actions: List[str],
     winners = await asyncio.gather(*tasks)
     return winners
 
-if __name__ == "__main__":
+
+def syllable_count(word: str) -> int:
+    if word.lower() in syllable_dict:
+        return max([len([y for y in x if y[-1].isdigit()]) for x in syllable_dict[word.lower()]])
+    else:
+        # Fallback method for words not in the dictionary
+        count = 0
+        vowels = "aeiouy"
+        word = word.lower()
+        if word[0] in vowels:
+            count += 1
+        for index in range(1, len(word)):
+            if word[index] in vowels and word[index - 1] not in vowels:
+                count += 1
+        if word.endswith("e"):
+            count -= 1
+        if count == 0:
+            count += 1
+        return count
+
+
+def get_words(line:str) -> List[str]:
+    tokens = nltk.word_tokenize(line)
+    return [token.lower() for token in tokens if token.isalpha()]
+
+
+def is_haiku(text: str) -> bool:
+    rows = text.split('\n')
+    row_words = [get_words(row) for row in rows]
+    row_syllables = [sum([syllable_count(word) for word in row]) for row in row_words]
+    is_haiku = row_syllables == [5, 7, 5]
+    return is_haiku
+
+
+async def get_winners_haikus(prompts: List[str], actions: List[str], a_primes: List[str], model: str) -> List[bool]:
+    system_message = "You are an assistant helping us decide which poem is better given an instruction for a topic. Please respond with only \"A\" or \"B\". We strongly prefer haikus which follow the instructions and make use of alliteration and weakly prefer haikus which use words with Latin cognates."
+    client = openai.AsyncOpenAI(max_retries=0)
+
+    tasks = []
+    for prompt, a, a_prime in zip(prompts, actions, a_primes):
+        a_is_haiku = is_haiku(a)
+        a_prime_is_haiku = is_haiku(a_prime)
+        if a_is_haiku != a_prime_is_haiku:
+            task = asyncio.Future()
+            task.set_result(a_is_haiku)
+        else:
+            task = asyncio.create_task(get_winner(client, model, system_message, prompt, a, a_prime))
+        tasks.append(task)
+
+    winners = await asyncio.gather(*tasks)
+    return winners
+
+
+def test_joke_winners():
     prompts = ["Tell me a joke about a dog", "tell me a joke about a cat"] * 16
     actions = ["What do you call a dog that does magic tricks? A labracadabrador.", "What do you call a cat that does magic tricks? A bad cat."] * 16
     a_primes = ["What do you call a dog that does magic tricks? A magical dog.", "What do you call a cat that does it all? Pawsome."] * 16
@@ -411,5 +491,20 @@ if __name__ == "__main__":
         winners = asyncio.run(get_winners('jokes', prompts, actions, a_primes))
         print(winners)
         time.sleep(0.01)
-                                                    # data = get_jokes('train')
 
+def test_haiku_winners():
+    prompts = ['Write a haiku containing the words "wet dog"'] * 2
+    actions = ['wet dog', "Wet dog, damp and drenched,\nWanders, wistful, waterlogged,\nWhiff of wild windswept."]
+    a_primes = ['Rain on fur, a splash,\nPaws dance in the puddled path,\nJoy of a wet dog.'] * 2
+    a0_is_haiku = is_haiku(actions[0])
+    assert not a0_is_haiku
+    a0_prime_is_haiku = is_haiku(a_primes[0])
+    assert a0_prime_is_haiku
+    winners = asyncio.run(get_winners('haikus', prompts, actions, a_primes))
+    assert winners == [False, True]
+    print('Haiku test passed!')
+
+                                                    # data = get_jokes('train')
+if __name__ == '__main__':
+    # test_joke_winners()
+    test_haiku_winners()
