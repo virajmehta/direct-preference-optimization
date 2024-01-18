@@ -22,6 +22,9 @@ ENV CUDA_HOME=/usr/local/cuda
 # do pip installs
 RUN pip install --no-cache-dir -r docker_requirements.txt
 
+# set up nltk
+RUN python setup_nltk.py
+
 # Start the container
 SHELL ["/bin/bash", "--login", "-c"]
 CMD [ "sleep infinity" ]
