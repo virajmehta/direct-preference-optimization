@@ -77,7 +77,7 @@ def get_shuffle_iterator(names: List[str],
     example_idx = 0
     is_train = split == 'train'
     done = False
-    dataset_is_online = (names[0] in ["jokes"])
+    dataset_is_online = (names[0] in ["jokes", "haikus"])
     while True:
         if n_epochs is not None and epoch_idx >= n_epochs:
             if not silent:

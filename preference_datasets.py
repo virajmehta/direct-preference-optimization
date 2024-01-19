@@ -238,6 +238,7 @@ def get_haikus(split: str, silent: bool=False, cache_dir: str = None) -> Dict[st
     for idx, row in tqdm.tqdm(df.iterrows(), desc="Processing Jokes", disable=silent, total=df.shape[0]):
         # prompt = "Instruct: " + row['prompt'] + "\nOutput: "
         prompt = f'Write a haiku containing the words "{row["keywords"]}".\n'
+        prompt = "Instruct: " + prompt + "\nOutput: "
         haiku = row['text']
         responses = [haiku]
         sft_target = haiku
